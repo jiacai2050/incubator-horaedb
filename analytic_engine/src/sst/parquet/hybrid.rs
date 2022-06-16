@@ -1,30 +1,64 @@
-use std::{
-    collections::{BTreeMap, HashMap},
-    convert::TryFrom,
-};
+use std::{collections::BTreeMap, convert::TryFrom, sync::Arc};
 
 use arrow_deps::arrow::{
-    array::{Float64Array, StringArray, TimestampMillisecondArray, UInt64Array},
-    datatypes::{Float64Type, TimestampMillisecondType},
+    array::{Float64Array, ListArray, StringArray, TimestampMillisecondArray, UInt64Array},
+    datatypes::{Float64Type, Schema as ArrowSchema, TimestampMillisecondType},
     record_batch::RecordBatch as ArrowRecordBatch,
 };
-use common_types::{column_schema::ColumnSchema, schema::Schema};
-use log::info;
+use common_types::schema::{DataType, Field, Schema};
 use snafu::ResultExt;
 
 use crate::sst::builder::{EncodeRecordBatch, Result};
 
 struct RecordWrapper {
-    tags: Vec<(String, String)>,
+    tag_values: Vec<String>,
     timestamps: Vec<Option<i64>>,
     fields: Vec<Option<f64>>,
 }
 
 fn build_new_record_format(
     schema: Schema,
+    tag_names: Vec<String>,
     records_by_tsid: BTreeMap<u64, RecordWrapper>,
 ) -> Result<ArrowRecordBatch> {
-    todo!()
+    let tsid_col = UInt64Array::from_iter_values(records_by_tsid.keys().cloned().into_iter());
+    let mut ts_col = Vec::new();
+    let mut fields_col = Vec::new();
+    let mut tag_cols = vec![Vec::new(); tag_names.len()];
+
+    for record_wrapper in records_by_tsid.values() {
+        ts_col.push(Some(record_wrapper.timestamps.clone()));
+        fields_col.push(Some(record_wrapper.fields.clone()));
+        for (idx, tagv) in record_wrapper.tag_values.iter().enumerate() {
+            tag_cols[idx].push(Some(tagv));
+        }
+    }
+
+    let mut all_fields = vec![
+        Field::new("timestamp", DataType::Int64, false),
+        Field::new("tsid", DataType::UInt64, false),
+    ];
+    let tag_fields = tag_names
+        .iter()
+        .map(|n| Field::new(n, DataType::Utf8, true))
+        .collect::<Vec<_>>();
+    all_fields.extend(tag_fields);
+    // hard code field name
+    all_fields.push(Field::new("value", DataType::Float64, false));
+
+    let arrow_schema = ArrowSchema::new_with_metadata(
+        all_fields,
+        schema.into_arrow_schema_ref().metadata().clone(),
+    );
+
+    let ts_col = ListArray::from_iter_primitive::<TimestampMillisecondType, _, _>(ts_col);
+    let fields_col = ListArray::from_iter_primitive::<Float64Type, _, _>(fields_col);
+    ArrowRecordBatch::try_new(
+        Arc::new(arrow_schema),
+        vec![Arc::new(ts_col), Arc::new(tsid_col), Arc::new(fields_col)],
+    )
+    .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+    .context(EncodeRecordBatch)
 }
 
 pub fn to_hybrid_record_batch(
@@ -37,12 +71,14 @@ pub fn to_hybrid_record_batch(
     let timestamp_idx = schema.timestamp_index();
 
     let mut tag_idxes = Vec::new();
+    let mut tag_names = Vec::new();
     let mut field_idxes = Vec::new();
     for (idx, col) in schema.columns().iter().enumerate() {
         if col.is_tag {
-            tag_idxes.push(idx)
+            tag_idxes.push(idx);
+            tag_names.push(col.name.clone());
         } else {
-            field_idxes.push(idx)
+            field_idxes.push(idx);
         }
     }
 
@@ -102,15 +138,18 @@ pub fn to_hybrid_record_batch(
             let record_wrapper = records_by_tsid
                 .entry(tsid)
                 .or_insert_with(|| RecordWrapper {
-                    tags: tag_idxes
+                    //                     tag_idxes
+                    // .iter()
+                    // .enumerate()
+                    // .map(|(i, tag_idx)| {
+                    //     (
+                    //         schema.column(*tag_idx).name.clone(),
+                    //         tagv_columns[i].value(offset).to_string(),
+                    //     )
+                    // })
+                    tag_values: tagv_columns
                         .iter()
-                        .enumerate()
-                        .map(|(i, tag_idx)| {
-                            (
-                                schema.column(*tag_idx).name.clone(),
-                                tagv_columns[i].value(offset).to_string(),
-                            )
-                        })
+                        .map(|col| col.value(offset).to_string())
                         .collect::<Vec<_>>(),
                     timestamps: vec![],
                     fields: vec![],
@@ -122,7 +161,7 @@ pub fn to_hybrid_record_batch(
         }
     }
 
-    build_new_record_format(schema, records_by_tsid)
+    build_new_record_format(schema, tag_names, records_by_tsid)
     // let ret = ArrowRecordBatch::concat(&arrow_schema,
     // &arrow_record_batch_vec)     .map_err(|e| Box::new(e) as _)
     //     .context(EncodeRecordBatch)?;
