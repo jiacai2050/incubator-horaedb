@@ -1,11 +1,14 @@
 use std::{collections::BTreeMap, convert::TryFrom, sync::Arc};
 
 use arrow_deps::arrow::{
-    array::{Float64Array, ListArray, StringArray, TimestampMillisecondArray, UInt64Array},
-    datatypes::{Float64Type, Schema as ArrowSchema, TimestampMillisecondType},
+    array::{
+        ArrayRef, Float64Array, ListArray, StringArray, TimestampMillisecondArray, UInt64Array,
+    },
+    datatypes::{Float64Type, Schema as ArrowSchema, TimeUnit, TimestampMillisecondType},
     record_batch::RecordBatch as ArrowRecordBatch,
 };
 use common_types::schema::{DataType, Field, Schema};
+use log::info;
 use snafu::ResultExt;
 
 use crate::sst::builder::{EncodeRecordBatch, Result};
@@ -30,12 +33,20 @@ fn build_new_record_format(
         ts_col.push(Some(record_wrapper.timestamps.clone()));
         fields_col.push(Some(record_wrapper.fields.clone()));
         for (idx, tagv) in record_wrapper.tag_values.iter().enumerate() {
-            tag_cols[idx].push(Some(tagv));
+            tag_cols[idx].push(Some(tagv.as_str()));
         }
     }
 
     let mut all_fields = vec![
-        Field::new("timestamp", DataType::Int64, false),
+        Field::new(
+            "timestamp",
+            DataType::List(Box::new(Field::new(
+                "timestamp",
+                DataType::Timestamp(TimeUnit::Millisecond, None),
+                false,
+            ))),
+            false,
+        ),
         Field::new("tsid", DataType::UInt64, false),
     ];
     let tag_fields = tag_names
@@ -44,7 +55,11 @@ fn build_new_record_format(
         .collect::<Vec<_>>();
     all_fields.extend(tag_fields);
     // hard code field name
-    all_fields.push(Field::new("value", DataType::Float64, false));
+    all_fields.push(Field::new(
+        "value",
+        DataType::List(Box::new(Field::new("value", DataType::Float64, false))),
+        false,
+    ));
 
     let arrow_schema = ArrowSchema::new_with_metadata(
         all_fields,
@@ -53,12 +68,23 @@ fn build_new_record_format(
 
     let ts_col = ListArray::from_iter_primitive::<TimestampMillisecondType, _, _>(ts_col);
     let fields_col = ListArray::from_iter_primitive::<Float64Type, _, _>(fields_col);
-    ArrowRecordBatch::try_new(
-        Arc::new(arrow_schema),
-        vec![Arc::new(ts_col), Arc::new(tsid_col), Arc::new(fields_col)],
-    )
-    .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
-    .context(EncodeRecordBatch)
+    let tag_cols = tag_cols
+        .into_iter()
+        .map(|c| Arc::new(StringArray::from(c)) as ArrayRef)
+        .collect::<Vec<_>>();
+    let columns = vec![
+        vec![Arc::new(ts_col) as ArrayRef],
+        vec![Arc::new(tsid_col) as ArrayRef],
+        tag_cols,
+        vec![Arc::new(fields_col) as ArrayRef],
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+
+    ArrowRecordBatch::try_new(Arc::new(arrow_schema), columns)
+        .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
+        .context(EncodeRecordBatch)
 }
 
 pub fn to_hybrid_record_batch(
@@ -67,8 +93,14 @@ pub fn to_hybrid_record_batch(
     let arrow_schema = arrow_record_batch_vec[0].schema();
     let schema = Schema::try_from(arrow_schema.clone()).unwrap();
 
-    let tsid_idx = schema.index_of_tsid().unwrap();
     let timestamp_idx = schema.timestamp_index();
+    let tsid_idx = schema.index_of_tsid();
+    if tsid_idx.is_none() {
+        return ArrowRecordBatch::concat(&arrow_schema, &arrow_record_batch_vec)
+            .map_err(|e| Box::new(e) as _)
+            .context(EncodeRecordBatch);
+    }
+    let tsid_idx = tsid_idx.unwrap();
 
     let mut tag_idxes = Vec::new();
     let mut tag_names = Vec::new();
@@ -78,10 +110,15 @@ pub fn to_hybrid_record_batch(
             tag_idxes.push(idx);
             tag_names.push(col.name.clone());
         } else {
-            field_idxes.push(idx);
+            if idx != timestamp_idx && idx != tsid_idx {
+                field_idxes.push(idx);
+            }
         }
     }
-
+    info!(
+        "ts_idx:{}, tsid_idx:{}, tag_idxes:{:?}, field_idxes:{:?}",
+        timestamp_idx, tsid_idx, tag_idxes, field_idxes
+    );
     let mut records_by_tsid = BTreeMap::new();
 
     for record_batch in arrow_record_batch_vec {
