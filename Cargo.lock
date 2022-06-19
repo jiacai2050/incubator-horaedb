@@ -153,8 +153,7 @@ checksum = "8da52d66c7071e2e3fa2a1e5c6d088fec47b593032b254f5e980de8ea54454d6"
 [[package]]
 name = "arrow"
 version = "7.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "66ec0a5964feebf378e2fc6db9530e712657b8edf72aa17b1b277b0f52a48e2d"
+source = "git+https://github.com/chunshao90/arrow-rs.git?branch=chunshao/parquet-7-refactor#ba55db57126b28e08be7bb514e4cba827acb2b77"
 dependencies = [
  "bitflags",
  "chrono",
@@ -592,6 +591,7 @@ dependencies = [
  "catalog_impls",
  "clap",
  "common_util",
+ "df_operator",
  "log",
  "logger",
  "query_engine",
@@ -599,7 +599,6 @@ dependencies = [
  "signal-hook",
  "table_engine",
  "tracing_util",
- "udf",
  "vergen",
 ]
 
@@ -989,7 +988,7 @@ dependencies = [
 [[package]]
 name = "datafusion"
 version = "6.0.0"
-source = "git+https://github.com/apache/arrow-datafusion.git?rev=444c153863520072ea22d4f8c498dee39437516d#444c153863520072ea22d4f8c498dee39437516d"
+source = "git+https://github.com/chunshao90/arrow-datafusion.git?branch=chunshao/parquet-7-refactor#44ea55c2b16e836141270485036a434f48cc379a"
 dependencies = [
  "ahash 0.7.6",
  "arrow",
@@ -1029,6 +1028,21 @@ dependencies = [
  "quote",
  "rustc_version",
  "syn",
+]
+
+[[package]]
+name = "df_operator"
+version = "0.1.0"
+dependencies = [
+ "arrow_deps",
+ "base64 0.13.0",
+ "bincode",
+ "chrono",
+ "common_types",
+ "common_util",
+ "hyperloglog",
+ "smallvec",
+ "snafu 0.6.10",
 ]
 
 [[package]]
@@ -1712,13 +1726,13 @@ dependencies = [
  "catalog_impls",
  "common_types",
  "common_util",
+ "df_operator",
  "log",
  "query_engine",
  "snafu 0.6.10",
  "sql",
  "table_engine",
  "tokio",
- "udf",
 ]
 
 [[package]]
@@ -2538,8 +2552,7 @@ dependencies = [
 [[package]]
 name = "parquet"
 version = "7.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c718575b34e488fa78d4f0286356abb8466573cb17ae8faa96ffd871ca6e8c6"
+source = "git+https://github.com/chunshao90/arrow-rs.git?branch=chunshao/parquet-7-refactor#ba55db57126b28e08be7bb514e4cba827acb2b77"
 dependencies = [
  "arrow",
  "base64 0.13.0",
@@ -2869,12 +2882,12 @@ dependencies = [
  "async-trait",
  "common_types",
  "common_util",
+ "df_operator",
  "futures",
  "log",
  "snafu 0.6.10",
  "sql",
  "table_engine",
- "udf",
 ]
 
 [[package]]
@@ -3333,6 +3346,7 @@ dependencies = [
  "ceresdbproto",
  "common_types",
  "common_util",
+ "df_operator",
  "futures",
  "grpcio 0.1.0",
  "http",
@@ -3355,7 +3369,6 @@ dependencies = [
  "table_engine",
  "tokio",
  "twox-hash",
- "udf",
  "warp",
 ]
 
@@ -3611,6 +3624,7 @@ dependencies = [
  "ceresdbproto",
  "common_types",
  "common_util",
+ "df_operator",
  "log",
  "paste 1.0.7",
  "regex",
@@ -3618,7 +3632,6 @@ dependencies = [
  "sqlparser",
  "table_engine",
  "tokio",
- "udf",
 ]
 
 [[package]]
@@ -4217,21 +4230,6 @@ name = "typenum"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dcf81ac59edc17cc8697ff311e8f5ef2d99fcbd9817b34cec66f90b6c3dfd987"
-
-[[package]]
-name = "udf"
-version = "0.1.0"
-dependencies = [
- "arrow_deps",
- "base64 0.13.0",
- "bincode",
- "chrono",
- "common_types",
- "common_util",
- "hyperloglog",
- "smallvec",
- "snafu 0.6.10",
-]
 
 [[package]]
 name = "uncover"
