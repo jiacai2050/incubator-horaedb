@@ -2,7 +2,11 @@
 
 // Flush and compaction logic of instance
 
-use std::{cmp, collections::Bound, sync::Arc};
+use std::{
+    cmp,
+    collections::{Bound, HashMap},
+    sync::Arc,
+};
 
 use common_types::{
     projected_schema::ProjectedSchema,
@@ -537,6 +541,7 @@ where
                 schema: table_data.schema(),
                 size: 0,
                 row_num: 0,
+                index_map: HashMap::new(),
             };
 
             let store = self.space_store.clone();
@@ -640,6 +645,7 @@ where
             schema: table_data.schema(),
             size: 0,
             row_num: 0,
+            index_map: HashMap::new(),
         };
 
         // Alloc file id for next sst file

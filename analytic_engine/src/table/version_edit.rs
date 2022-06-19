@@ -2,7 +2,10 @@
 
 //! Version edits
 
-use std::convert::{TryFrom, TryInto};
+use std::{
+    collections::HashMap,
+    convert::{TryFrom, TryInto},
+};
 
 use common_types::{bytes::Bytes, schema::Schema, time::TimeRange, SequenceNumber};
 use common_util::define_result;
@@ -83,6 +86,7 @@ impl TryFrom<meta_pb::AddFileMeta> for AddFile {
                     schema,
                     size: src.size,
                     row_num: src.row_num,
+                    index_map: HashMap::new(),
                 },
             },
         })

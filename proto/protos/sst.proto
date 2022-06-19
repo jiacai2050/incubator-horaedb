@@ -6,6 +6,14 @@ package sst;
 
 import "common.proto";
 
+message TSIDs{
+  repeated uint64 tsids = 1;
+}
+
+message IndexValue{
+  map<string, TSIDs> value = 1;
+}
+
 message SstMetaData {
   // Min key in the sst
   bytes min_key = 1;
@@ -18,4 +26,5 @@ message SstMetaData {
   common.TableSchema schema = 5;
   uint64 size = 6;
   uint64 row_num = 7;
+  map<string, IndexValue> index_map = 8;
 }

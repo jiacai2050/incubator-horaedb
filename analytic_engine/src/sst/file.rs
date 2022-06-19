@@ -5,7 +5,7 @@
 use std::{
     borrow::Borrow,
     cmp,
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     convert::TryFrom,
     fmt,
     fmt::Debug,
@@ -29,7 +29,10 @@ use common_util::{
 };
 use log::{debug, error, info};
 use object_store::ObjectStore;
-use proto::{common::TimeRange as TimeRangePb, sst::SstMetaData as SstMetaDataPb};
+use proto::{
+    common::TimeRange as TimeRangePb,
+    sst::{IndexValue, SstMetaData as SstMetaDataPb, TSIDs},
+};
 use snafu::{ResultExt, Snafu};
 use table_engine::table::TableId;
 use tokio::sync::{
@@ -37,7 +40,11 @@ use tokio::sync::{
     Mutex,
 };
 
-use crate::{space::SpaceId, sst::manager::FileId, table::sst_util};
+use crate::{
+    space::SpaceId,
+    sst::{manager::FileId, parquet::builder::IndexMap},
+    table::sst_util,
+};
 
 /// Error of sst file.
 #[derive(Debug, Snafu)]
@@ -420,6 +427,8 @@ pub struct SstMetaData {
     pub size: u64,
     // total row number
     pub row_num: u64,
+
+    pub index_map: IndexMap,
 }
 
 impl From<SstMetaData> for SstMetaDataPb {
@@ -434,6 +443,16 @@ impl From<SstMetaData> for SstMetaDataPb {
         target.set_size(src.size);
         target.set_row_num(src.row_num);
 
+        src.index_map.into_iter().for_each(|(key, value)| {
+            let mut index_value = IndexValue::default();
+            value.into_iter().for_each(|(tag_value, tsids)| {
+                let mut tsids_pb = TSIDs::default();
+                tsids_pb.tsids = tsids;
+                index_value.value.insert(tag_value, tsids_pb);
+            });
+            target.index_map.insert(key, index_value);
+        });
+
         target
     }
 }
@@ -444,6 +463,14 @@ impl TryFrom<SstMetaDataPb> for SstMetaData {
     fn try_from(mut src: SstMetaDataPb) -> Result<Self> {
         let time_range = TimeRange::try_from(src.take_time_range()).context(ConvertTimeRange)?;
         let schema = Schema::try_from(src.take_schema()).context(ConvertTableSchema)?;
+        let mut index_map = HashMap::new();
+        src.index_map.into_iter().for_each(|(key, value)| {
+            let mut index_value = HashMap::new();
+            value.value.into_iter().for_each(|(tag_value, tsids)| {
+                index_value.insert(tag_value, tsids.tsids);
+            });
+            index_map.insert(key, index_value);
+        });
         Ok(Self {
             min_key: src.min_key.into(),
             max_key: src.max_key.into(),
@@ -452,6 +479,7 @@ impl TryFrom<SstMetaDataPb> for SstMetaData {
             schema,
             size: src.size,
             row_num: src.row_num,
+            index_map,
         })
     }
 }
@@ -636,6 +664,7 @@ pub fn merge_sst_meta(files: &[FileHandle], schema: Schema) -> SstMetaData {
         // we don't know file size and total row number yet
         size: 0,
         row_num: 0,
+        index_map: HashMap::new(),
     }
 }
 
