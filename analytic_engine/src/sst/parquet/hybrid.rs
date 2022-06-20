@@ -8,7 +8,7 @@ use arrow_deps::arrow::{
     record_batch::RecordBatch as ArrowRecordBatch,
 };
 use common_types::schema::{DataType, Field, Schema};
-use log::info;
+use log::debug;
 use snafu::ResultExt;
 
 use crate::sst::builder::{EncodeRecordBatch, Result};
@@ -19,6 +19,10 @@ struct RecordWrapper {
     fields: Vec<Option<f64>>,
 }
 
+// For now, tsid/timestamp/field name is hard-coded as `tsid`, `timestamp` and
+// `value`
+//
+// only support one field.
 fn build_new_record_format(
     schema: Schema,
     tag_names: Vec<String>,
@@ -41,9 +45,9 @@ fn build_new_record_format(
         Field::new(
             "timestamp",
             DataType::List(Box::new(Field::new(
-                "timestamp",
+                "item", // this name is hard-coded in array
                 DataType::Timestamp(TimeUnit::Millisecond, None),
-                false,
+                true,
             ))),
             false,
         ),
@@ -57,8 +61,8 @@ fn build_new_record_format(
     // hard code field name
     all_fields.push(Field::new(
         "value",
-        DataType::List(Box::new(Field::new("value", DataType::Float64, false))),
-        false,
+        DataType::List(Box::new(Field::new("item", DataType::Float64, true))),
+        true,
     ));
 
     let arrow_schema = ArrowSchema::new_with_metadata(
@@ -95,13 +99,15 @@ pub fn to_hybrid_record_batch(
 
     let timestamp_idx = schema.timestamp_index();
     let tsid_idx = schema.index_of_tsid();
+
     if tsid_idx.is_none() {
+        // if table has no tsid, then return back directly.
         return ArrowRecordBatch::concat(&arrow_schema, &arrow_record_batch_vec)
             .map_err(|e| Box::new(e) as _)
             .context(EncodeRecordBatch);
     }
-    let tsid_idx = tsid_idx.unwrap();
 
+    let tsid_idx = tsid_idx.unwrap();
     let mut tag_idxes = Vec::new();
     let mut tag_names = Vec::new();
     let mut field_idxes = Vec::new();
@@ -115,7 +121,7 @@ pub fn to_hybrid_record_batch(
             }
         }
     }
-    info!(
+    debug!(
         "ts_idx:{}, tsid_idx:{}, tag_idxes:{:?}, field_idxes:{:?}",
         timestamp_idx, tsid_idx, tag_idxes, field_idxes
     );
@@ -175,7 +181,7 @@ pub fn to_hybrid_record_batch(
             let record_wrapper = records_by_tsid
                 .entry(tsid)
                 .or_insert_with(|| RecordWrapper {
-                    //                     tag_idxes
+                    // tag_idxes
                     // .iter()
                     // .enumerate()
                     // .map(|(i, tag_idx)| {
@@ -199,8 +205,4 @@ pub fn to_hybrid_record_batch(
     }
 
     build_new_record_format(schema, tag_names, records_by_tsid)
-    // let ret = ArrowRecordBatch::concat(&arrow_schema,
-    // &arrow_record_batch_vec)     .map_err(|e| Box::new(e) as _)
-    //     .context(EncodeRecordBatch)?;
-    // Ok(ret)
 }
