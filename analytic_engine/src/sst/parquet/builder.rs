@@ -3,6 +3,8 @@
 //! Sst builder implementation based on parquet.
 
 use std::{
+    collections::HashMap,
+    convert::TryFrom,
     io::SeekFrom,
     pin::Pin,
     sync::{
@@ -13,15 +15,18 @@ use std::{
 };
 
 use arrow_deps::{
-    arrow::record_batch::RecordBatch as ArrowRecordBatch,
+    arrow::{
+        array::{StringArray, UInt64Array},
+        record_batch::RecordBatch as ArrowRecordBatch,
+    },
     datafusion::parquet::basic::Compression,
     parquet::{
         arrow::ArrowWriter,
-        file::{properties::WriterProperties, writer::TryClone},
+        file::{metadata::KeyValue, properties::WriterProperties, writer::TryClone},
     },
 };
 use async_trait::async_trait;
-use common_types::{bytes::BufMut, request_id::RequestId};
+use common_types::{bytes::BufMut, request_id::RequestId, schema::Schema};
 use futures::{AsyncRead, AsyncReadExt};
 use log::debug;
 use object_store::{ObjectStore, Path};
@@ -191,6 +196,10 @@ impl EncodingBufferInner {
     }
 }
 
+// tagkey => { tagvalue => tsid }
+pub type IndexMap = HashMap<String, HashMap<String, Vec<TSID>>>;
+pub type TSID = u64;
+
 /// RecordBytesReader provides AsyncRead implementation for the encoded records
 /// by parquet.
 struct RecordBytesReader {
@@ -207,6 +216,57 @@ struct RecordBytesReader {
     stream_finished: bool,
 
     fetched_row_num: usize,
+    index_map: IndexMap,
+}
+
+impl RecordBytesReader {
+    fn build_index(index_map: &mut IndexMap, arrow_record_batch_vec: &Vec<ArrowRecordBatch>) {
+        let arrow_schema = arrow_record_batch_vec[0].schema();
+        let schema = Schema::try_from(arrow_schema.clone()).unwrap();
+
+        let tsid_idx = schema.index_of_tsid().unwrap();
+
+        let mut tag_idxes = Vec::new();
+        for (idx, col) in schema.columns().iter().enumerate() {
+            if col.is_tag {
+                tag_idxes.push(idx);
+                index_map.insert(col.name.clone(), HashMap::new());
+            }
+        }
+
+        for record_batch in arrow_record_batch_vec {
+            let tsid_array = record_batch
+                .column(tsid_idx)
+                .as_any()
+                .downcast_ref::<UInt64Array>()
+                .expect("checked in build plan");
+
+            if tsid_array.is_empty() {
+                continue;
+            }
+
+            let mut tagv_columns = Vec::with_capacity(tag_idxes.len());
+            for col_idx in &tag_idxes {
+                let v = record_batch
+                    .column(*col_idx)
+                    .as_any()
+                    .downcast_ref::<StringArray>()
+                    .unwrap();
+                tagv_columns.push(v);
+                for (i, tagvalue_opt) in v.iter().enumerate() {
+                    if let Some(tagvalue) = tagvalue_opt {
+                        let map = index_map.get_mut(&schema.column(col_idx.clone()).name);
+                        if let Some(map_inner) = map {
+                            map_inner
+                                .entry(tagvalue.to_string())
+                                .or_default()
+                                .push(tsid_array.value(i));
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Build the write properties containing the sst meta data.
@@ -236,6 +296,7 @@ fn encode_record_batch(
     meta_data: &SstMetaData,
     mem_buf_writer: EncodingBuffer,
     arrow_record_batch_vec: Vec<ArrowRecordBatch>,
+    index_map: &mut IndexMap,
 ) -> Result<usize> {
     if arrow_record_batch_vec.is_empty() {
         return Ok(0);
@@ -252,6 +313,8 @@ fn encode_record_batch(
         *arrow_writer = Some(writer);
     }
 
+    RecordBytesReader::build_index(index_map, &arrow_record_batch_vec);
+
     let record_batch = ArrowRecordBatch::concat(&arrow_schema, &arrow_record_batch_vec)
         .map_err(|e| Box::new(e) as _)
         .context(EncodeRecordBatch)?;
@@ -266,10 +329,25 @@ fn encode_record_batch(
     Ok(record_batch.num_rows())
 }
 
+#[allow(dead_code)]
 fn close_writer(arrow_writer: &mut Option<ArrowWriter<EncodingBuffer>>) -> Result<()> {
     if let Some(arrow_writer) = arrow_writer {
         arrow_writer
             .close()
+            .map_err(|e| Box::new(e) as _)
+            .context(EncodeRecordBatch)?;
+    }
+
+    Ok(())
+}
+
+fn close_writer_with_metadata(
+    arrow_writer: &mut Option<ArrowWriter<EncodingBuffer>>,
+    key_value_metadata: Option<Vec<KeyValue>>,
+) -> Result<()> {
+    if let Some(arrow_writer) = arrow_writer {
+        arrow_writer
+            .close_with_metadata(key_value_metadata)
             .map_err(|e| Box::new(e) as _)
             .context(EncodeRecordBatch)?;
     }
@@ -346,15 +424,28 @@ impl AsyncRead for RecordBytesReader {
             &reader.meta_data,
             reader.encoding_buffer.clone(),
             std::mem::take(&mut reader.arrow_record_batch_vec),
+            &mut reader.index_map,
         ) {
             Err(e) => return Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e))),
             Ok(row_num) => {
                 reader.total_row_num.fetch_add(row_num, Ordering::Relaxed);
             }
         }
+        reader.meta_data.index_map = std::mem::take(&mut reader.index_map);
+
+        let meta_data_kv: Result<_> = encoding::encode_sst_meta_data(reader.meta_data.clone())
+            .map_err(|e| Box::new(e) as _)
+            .context(EncodeMetaData);
+
+        if let Err(e) = meta_data_kv {
+            return Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e)));
+        }
 
         if reader.stream_finished {
-            if let Err(e) = close_writer(reader.arrow_writer.get_mut().unwrap()) {
+            if let Err(e) = close_writer_with_metadata(
+                reader.arrow_writer.get_mut().unwrap(),
+                Some(vec![meta_data_kv.unwrap()]),
+            ) {
                 return Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e)));
             }
         }
@@ -390,6 +481,7 @@ impl<'a, S: ObjectStore> SstBuilder for ParquetSstBuilder<'a, S> {
             meta_data: meta.to_owned(),
             stream_finished: false,
             fetched_row_num: 0,
+            index_map: HashMap::new(),
         };
         // TODO(ruihang): `RecordBytesReader` support stream read. It could be improved
         // if the storage supports streaming upload (maltipart upload).
