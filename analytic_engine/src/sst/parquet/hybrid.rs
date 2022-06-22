@@ -206,3 +206,95 @@ pub fn to_hybrid_record_batch(
 
     build_new_record_format(schema, tag_names, records_by_tsid)
 }
+
+pub fn parse_hybrid_record_batch(
+    schema: Schema,
+    arrow_record_batch: ArrowRecordBatch,
+) -> Result<ArrowRecordBatch> {
+    // let arrow_schema = arrow_record_batch.schema();
+    // let schema = Schema::try_from(arrow_schema.clone()).unwrap();
+    let arrow_schema = schema.to_arrow_schema_ref();
+
+    let timestamp_idx = schema.timestamp_index();
+    let tsid_idx = schema.index_of_tsid();
+
+    if tsid_idx.is_none() {
+        return Ok(arrow_record_batch);
+    }
+
+    let tsid_idx = tsid_idx.unwrap();
+    let mut tag_idxes = Vec::new();
+    let mut tag_names = Vec::new();
+    let mut field_idxes = Vec::new();
+    for (idx, col) in schema.columns().iter().enumerate() {
+        if col.is_tag {
+            tag_idxes.push(idx);
+            tag_names.push(col.name.clone());
+        } else {
+            if idx != timestamp_idx && idx != tsid_idx {
+                field_idxes.push(idx);
+            }
+        }
+    }
+
+    debug!(
+        "ts_idx:{}, tsid_idx:{}, tag_idxes:{:?}, field_idxes:{:?}",
+        timestamp_idx, tsid_idx, tag_idxes, field_idxes
+    );
+    let field_idx = field_idxes[0]; // only support one field now.
+    let tsid_col = arrow_record_batch
+        .column(tsid_idx)
+        .as_any()
+        .downcast_ref::<UInt64Array>()
+        .unwrap();
+    let timestamp_col = arrow_record_batch
+        .column(timestamp_idx)
+        .as_any()
+        .downcast_ref::<ListArray>()
+        .unwrap();
+    let field_col = arrow_record_batch
+        .column(field_idx)
+        .as_any()
+        .downcast_ref::<ListArray>()
+        .unwrap();
+    let tag_cols = tag_idxes
+        .into_iter()
+        .map(|i| {
+            arrow_record_batch
+                .column(i)
+                .as_any()
+                .downcast_ref::<StringArray>()
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    let mut new_batches = Vec::new();
+    for row_idx in 0..tsid_col.len() {
+        let tsid = tsid_col.value(row_idx);
+        let timestamps_in_one_tsid = timestamp_col.value(row_idx);
+        let fields_in_one_tsid = field_col.value(row_idx);
+
+        let num_row = timestamps_in_one_tsid.len();
+        let new_tsid_col = vec![Some(tsid); num_row]
+            .into_iter()
+            .collect::<UInt64Array>();
+
+        let mut all_cols = Vec::new();
+        all_cols.push(timestamps_in_one_tsid);
+        all_cols.push(Arc::new(new_tsid_col) as ArrayRef);
+        for c in &tag_cols {
+            let tagv = c.value(row_idx).to_string();
+            let c = vec![Some(tagv); num_row]
+                .into_iter()
+                .collect::<StringArray>();
+            all_cols.push(Arc::new(c));
+        }
+        all_cols.push(fields_in_one_tsid);
+        let batch = ArrowRecordBatch::try_new(arrow_schema.clone(), all_cols).unwrap();
+        new_batches.push(batch);
+    }
+
+    ArrowRecordBatch::concat(&arrow_schema, &new_batches)
+        .map_err(|e| Box::new(e) as _)
+        .context(EncodeRecordBatch)
+}

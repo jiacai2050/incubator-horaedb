@@ -38,7 +38,7 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 use crate::sst::{
     factory::SstReaderOptions,
     file::SstMetaData,
-    parquet::encoding,
+    parquet::{encoding, hybrid},
     reader::{error::*, SstReader},
 };
 
@@ -326,6 +326,9 @@ impl ProjectAndFilterReader {
                 .context(DecodeRecordBatch)
             {
                 Ok(record_batch) => {
+                    let record_batch =
+                        hybrid::parse_hybrid_record_batch(self.schema.clone(), record_batch)
+                            .unwrap();
                     row_num += record_batch.num_rows();
 
                     let record_batch_with_key = arrow_record_batch_projector
