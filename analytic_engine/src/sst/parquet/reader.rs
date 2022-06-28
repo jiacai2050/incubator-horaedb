@@ -203,6 +203,7 @@ impl<'a, S: ObjectStore> ParquetSstReader<'a, S> {
                 predicate,
                 batch_size,
                 reverse,
+                enable_hybrid: super::builder::enable_hybrid(),
             };
 
             let start_fetch = Instant::now();
@@ -249,6 +250,7 @@ struct ProjectAndFilterReader {
     predicate: PredicateRef,
     batch_size: usize,
     reverse: bool,
+    enable_hybrid: bool,
 }
 
 impl ProjectAndFilterReader {
@@ -326,9 +328,13 @@ impl ProjectAndFilterReader {
                 .context(DecodeRecordBatch)
             {
                 Ok(record_batch) => {
-                    let record_batch =
+                    let record_batch = if self.enable_hybrid {
                         hybrid::parse_hybrid_record_batch(self.schema.clone(), record_batch)
-                            .unwrap();
+                            .unwrap()
+                    } else {
+                        record_batch
+                    };
+
                     row_num += record_batch.num_rows();
 
                     let record_batch_with_key = arrow_record_batch_projector

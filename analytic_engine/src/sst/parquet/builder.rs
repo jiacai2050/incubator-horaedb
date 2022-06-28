@@ -206,6 +206,7 @@ struct RecordBytesReader {
     // Whether the underlying `record_stream` is finished
     stream_finished: bool,
 
+    enable_hybrid: bool,
     fetched_row_num: usize,
 }
 
@@ -236,13 +237,23 @@ fn encode_record_batch(
     meta_data: &SstMetaData,
     mem_buf_writer: EncodingBuffer,
     arrow_record_batch_vec: Vec<ArrowRecordBatch>,
+    enable_hybrid: bool,
 ) -> Result<usize> {
     if arrow_record_batch_vec.is_empty() {
         return Ok(0);
     }
 
-    let record_batch = super::hybrid::to_hybrid_record_batch(arrow_record_batch_vec)?;
-    let arrow_schema = record_batch.schema();
+    let (record_batch, arrow_schema) = if enable_hybrid {
+        let record_batch = super::hybrid::to_hybrid_record_batch(arrow_record_batch_vec)?;
+        let arrow_schema = record_batch.schema();
+        (record_batch, arrow_schema)
+    } else {
+        let arrow_schema = arrow_record_batch_vec[0].schema();
+        let record_batch = ArrowRecordBatch::concat(&arrow_schema, &arrow_record_batch_vec)
+            .map_err(|e| Box::new(e) as _)
+            .context(EncodeRecordBatch)?;
+        (record_batch, arrow_schema)
+    };
 
     // create arrow writer if not exist
     if arrow_writer.is_none() {
@@ -252,10 +263,6 @@ fn encode_record_batch(
             .context(EncodeRecordBatch)?;
         *arrow_writer = Some(writer);
     }
-
-    // let record_batch = ArrowRecordBatch::concat(&arrow_schema,
-    // &arrow_record_batch_vec)     .map_err(|e| Box::new(e) as _)
-    //     .context(EncodeRecordBatch)?;
 
     arrow_writer
         .as_mut()
@@ -347,6 +354,7 @@ impl AsyncRead for RecordBytesReader {
             &reader.meta_data,
             reader.encoding_buffer.clone(),
             std::mem::take(&mut reader.arrow_record_batch_vec),
+            reader.enable_hybrid,
         ) {
             Err(e) => return Poll::Ready(Err(std::io::Error::new(std::io::ErrorKind::Other, e))),
             Ok(row_num) => {
@@ -390,6 +398,7 @@ impl<'a, S: ObjectStore> SstBuilder for ParquetSstBuilder<'a, S> {
             // TODO(xikai): should we avoid this clone?
             meta_data: meta.to_owned(),
             stream_finished: false,
+            enable_hybrid: enable_hybrid(),
             fetched_row_num: 0,
         };
         // TODO(ruihang): `RecordBytesReader` support stream read. It could be improved
@@ -414,6 +423,10 @@ impl<'a, S: ObjectStore> SstBuilder for ParquetSstBuilder<'a, S> {
             row_num: total_row_num.load(Ordering::Relaxed),
         })
     }
+}
+
+pub fn enable_hybrid() -> bool {
+    std::env::var("ENABLE_HYBRID").unwrap_or("false".to_string()) == "true"
 }
 
 #[cfg(test)]
