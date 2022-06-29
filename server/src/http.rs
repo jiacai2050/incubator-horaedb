@@ -112,6 +112,12 @@ impl<C: CatalogManager + 'static, Q: QueryExecutor + 'static> Service<C, Q> {
         warp::path::end().and(warp::get()).map(|| {
             let mut resp = HashMap::new();
             resp.insert("status", "ok");
+            let hybrid_mode = if analytic_engine::sst::enable_hybrid() {
+                "yes"
+            } else {
+                "no"
+            };
+            resp.insert("hybrid_mode", hybrid_mode);
             reply::json(&resp)
         })
     }

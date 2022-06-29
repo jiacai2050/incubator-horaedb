@@ -8,3 +8,5 @@ pub mod file;
 pub mod manager;
 pub mod parquet;
 pub mod reader;
+
+pub use self::parquet::builder::enable_hybrid;
