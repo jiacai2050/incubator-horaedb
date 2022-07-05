@@ -41,7 +41,8 @@ fn build_new_record_format(
         }
     }
 
-    let mut all_fields = vec![
+    let primary_key_fields = vec![
+        Field::new("tsid", DataType::UInt64, false),
         Field::new(
             "timestamp",
             DataType::List(Box::new(Field::new(
@@ -51,19 +52,25 @@ fn build_new_record_format(
             ))),
             false,
         ),
-        Field::new("tsid", DataType::UInt64, false),
     ];
     let tag_fields = tag_names
         .iter()
         .map(|n| Field::new(n, DataType::Utf8, true))
         .collect::<Vec<_>>();
-    all_fields.extend(tag_fields);
-    // hard code field name
-    all_fields.push(Field::new(
-        "value",
-        DataType::List(Box::new(Field::new("item", DataType::Float64, true))),
-        true,
-    ));
+
+    let all_fields = vec![
+        primary_key_fields,
+        tag_fields,
+        vec![Field::new(
+            "value",
+            // hard code field name
+            DataType::List(Box::new(Field::new("item", DataType::Float64, true))),
+            true,
+        )],
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
 
     let arrow_schema = ArrowSchema::new_with_metadata(
         all_fields,
@@ -77,8 +84,8 @@ fn build_new_record_format(
         .map(|c| Arc::new(StringArray::from(c)) as ArrayRef)
         .collect::<Vec<_>>();
     let columns = vec![
-        vec![Arc::new(ts_col) as ArrayRef],
         vec![Arc::new(tsid_col) as ArrayRef],
+        vec![Arc::new(ts_col) as ArrayRef],
         tag_cols,
         vec![Arc::new(fields_col) as ArrayRef],
     ]
@@ -242,6 +249,7 @@ pub fn parse_hybrid_record_batch(
         timestamp_idx, tsid_idx, tag_idxes, field_idxes
     );
     let field_idx = field_idxes[0]; // only support one field now.
+
     let tsid_col = arrow_record_batch
         .column(tsid_idx)
         .as_any()
@@ -280,8 +288,8 @@ pub fn parse_hybrid_record_batch(
             .collect::<UInt64Array>();
 
         let mut all_cols = Vec::new();
-        all_cols.push(timestamps_in_one_tsid);
         all_cols.push(Arc::new(new_tsid_col) as ArrayRef);
+        all_cols.push(timestamps_in_one_tsid);
         for c in &tag_cols {
             let tagv = c.value(row_idx).to_string();
             let c = vec![Some(tagv); num_row]

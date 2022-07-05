@@ -828,9 +828,9 @@ fn build_schema_from_metric(schema_config: &SchemaConfig, metric: &WriteMetric) 
 
     schema_builder = schema_builder
         .enable_tsid_primary_key(true)
-        .add_key_column(timestamp_column_schema)
-        .with_context(|| BuildTableSchema { metric: table_name })?
         .add_key_column(tsid_column_schema)
+        .with_context(|| BuildTableSchema { metric: table_name })?
+        .add_key_column(timestamp_column_schema)
         .with_context(|| BuildTableSchema { metric: table_name })?;
 
     for col in name_column_map.into_values() {
