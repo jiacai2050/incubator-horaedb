@@ -25,7 +25,7 @@ use common_types::{
 };
 use common_util::runtime::Runtime;
 use futures::Stream;
-use log::{debug, error, trace};
+use log::{debug, error, info, trace};
 use object_store::{ObjectStore, Path};
 use parquet::{
     reverse_reader::Builder as ReverseRecordBatchReaderBuilder, CachableSerializedFileReader,
@@ -204,6 +204,7 @@ impl<'a, S: ObjectStore> ParquetSstReader<'a, S> {
                 batch_size,
                 reverse,
                 enable_hybrid: super::builder::enable_hybrid(),
+                // metrics: Vec::new(),
             };
 
             let start_fetch = Instant::now();
@@ -251,7 +252,14 @@ struct ProjectAndFilterReader {
     batch_size: usize,
     reverse: bool,
     enable_hybrid: bool,
+    // metrics: Vec<String>,
 }
+
+// impl Drop for ProjectAndFilterReader {
+//     fn drop(&mut self) {
+//         info!("ProjectAndFilterReader metrics: {:?}", self.metrics);
+//     }
+// }
 
 impl ProjectAndFilterReader {
     fn build_row_group_predicate(&self) -> Box<dyn Fn(&RowGroupMetaData, usize) -> bool + 'static> {
@@ -314,6 +322,7 @@ impl ProjectAndFilterReader {
     ) -> Result<usize> {
         let reader = self.project_and_filter_reader()?;
 
+        let mut metrics = Vec::new();
         let arrow_record_batch_projector = ArrowRecordBatchProjector::from(self.row_projector);
         let mut row_num = 0;
         for record_batch in reader {
@@ -329,9 +338,20 @@ impl ProjectAndFilterReader {
             {
                 Ok(record_batch) => {
                     let record_batch = if self.enable_hybrid {
-                        hybrid::parse_hybrid_record_batch(self.schema.clone(), record_batch)
-                            .unwrap()
+                        let old_row = record_batch.num_rows();
+                        let now = Instant::now();
+                        let b =
+                            hybrid::parse_hybrid_record_batch(self.schema.clone(), record_batch)
+                                .unwrap();
+                        metrics.push(format!(
+                            "input:{}, output:{}, cost:{}ms",
+                            old_row,
+                            b.num_rows(),
+                            Instant::now().duration_since(now).as_millis()
+                        ));
+                        b
                     } else {
+                        metrics.push(format!("input:{}", record_batch.num_rows()));
                         record_batch
                     };
 
@@ -351,6 +371,7 @@ impl ProjectAndFilterReader {
             };
         }
 
+        info!("ProjectAndFilterReader metrics: {:?}", metrics);
         Ok(row_num)
     }
 }

@@ -22,6 +22,7 @@ serde = "1.0"
 serde_derive = "1.0"
 table_engine = { path = "../table_engine" }
 tokio = { version = "1.0", features = ["sync"] }
+pprof = { version = "0.10", features = ["flamegraph"] }
 
 [dev-dependencies]
 criterion = "0.3"
@@ -32,3 +33,7 @@ harness = false
 
 [[bin]]
 name = "sst-tools"
+
+[[bin]]
+name = "bench-hybrid"
+path = "src/bin/bench-hybrid.rs"

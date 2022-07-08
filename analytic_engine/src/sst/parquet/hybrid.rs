@@ -2,9 +2,13 @@ use std::{collections::BTreeMap, convert::TryFrom, sync::Arc};
 
 use arrow_deps::arrow::{
     array::{
-        ArrayRef, Float64Array, ListArray, StringArray, TimestampMillisecondArray, UInt64Array,
+        ArrayRef, DictionaryArray, Float64Array, ListArray, StringArray, TimestampMillisecondArray,
+        UInt64Array,
     },
-    datatypes::{Float64Type, Schema as ArrowSchema, TimeUnit, TimestampMillisecondType},
+    datatypes::{
+        Float64Type, Int8Type, Schema as ArrowSchema, TimeUnit, TimestampMillisecondType,
+        UInt32Type, UInt64Type, UInt8Type,
+    },
     record_batch::RecordBatch as ArrowRecordBatch,
 };
 use common_types::schema::{DataType, Field, Schema};
@@ -82,6 +86,8 @@ fn build_new_record_format(
     let tag_cols = tag_cols
         .into_iter()
         .map(|c| Arc::new(StringArray::from(c)) as ArrayRef)
+        // .map(|c| Arc::new(DictionaryArray Array::from(c)) as ArrayRef)
+        // DataType::Dictionary(Box::new(DataType::UInt64), Box::new(DataType::Utf8)),
         .collect::<Vec<_>>();
     let columns = vec![
         vec![Arc::new(tsid_col) as ArrayRef],
@@ -221,6 +227,25 @@ pub fn parse_hybrid_record_batch(
     // let arrow_schema = arrow_record_batch.schema();
     // let schema = Schema::try_from(arrow_schema.clone()).unwrap();
     let arrow_schema = schema.to_arrow_schema_ref();
+    // let new_fields = arrow_schema
+    //     .fields()
+    //     .into_iter()
+    //     .map(|f| {
+    //         if ["tsid", "timestamp", "value"].contains(&f.name().as_str()) {
+    //             f.clone()
+    //         } else {
+    //             Field::new(
+    //                 f.name(),
+    //                 DataType::Dictionary(Box::new(DataType::UInt64),
+    // Box::new(DataType::Utf8)),                 false,
+    //             )
+    //         }
+    //     })
+    //     .collect::<Vec<_>>();
+    // let arrow_schema = Arc::new(ArrowSchema::new_with_metadata(
+    //     new_fields,
+    //     arrow_schema.metadata().clone(),
+    // ));
 
     let timestamp_idx = schema.timestamp_index();
     let tsid_idx = schema.index_of_tsid();
@@ -275,27 +300,31 @@ pub fn parse_hybrid_record_batch(
                 .unwrap()
         })
         .collect::<Vec<_>>();
+    let num_cols = tag_cols.len() + 3; // tsid + timestamp + value
 
-    let mut new_batches = Vec::new();
+    let mut new_batches = Vec::with_capacity(tsid_col.len());
     for row_idx in 0..tsid_col.len() {
         let tsid = tsid_col.value(row_idx);
         let timestamps_in_one_tsid = timestamp_col.value(row_idx);
         let fields_in_one_tsid = field_col.value(row_idx);
 
         let num_row = timestamps_in_one_tsid.len();
-        let new_tsid_col = vec![Some(tsid); num_row]
-            .into_iter()
-            .collect::<UInt64Array>();
+        let new_tsid_col = (0..num_row).map(|_| Some(tsid)).collect::<UInt64Array>();
 
-        let mut all_cols = Vec::new();
+        let mut all_cols = Vec::with_capacity(num_cols);
         all_cols.push(Arc::new(new_tsid_col) as ArrayRef);
         all_cols.push(timestamps_in_one_tsid);
         for c in &tag_cols {
             let tagv = c.value(row_idx).to_string();
-            let c = vec![Some(tagv); num_row]
-                .into_iter()
+            let array = (0..num_row)
+                .map(|_| Some(&tagv))
+                // .collect::<DictionaryArray<UInt64Type>>();
                 .collect::<StringArray>();
-            all_cols.push(Arc::new(c));
+            // let values = StringArray::from_iter_values([tagv]);
+            // let keys = UInt64Array::from_iter_values(0..num_row as u64);
+            // let array = DictionaryArray::<UInt64Type>::try_new(&keys, &values).unwrap();
+
+            all_cols.push(Arc::new(array));
         }
         all_cols.push(fields_in_one_tsid);
         let batch = ArrowRecordBatch::try_new(arrow_schema.clone(), all_cols).unwrap();
