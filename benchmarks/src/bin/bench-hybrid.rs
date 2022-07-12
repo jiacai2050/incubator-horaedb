@@ -22,7 +22,7 @@ fn bench_hybrid_sst_disable(c: &mut Criterion) {
 
 criterion_group! {
     name = benches;
-    config = Criterion::default().sample_size(10).with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    config = Criterion::default().sample_size(50).with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
     targets = bench_hybrid_sst_enable , bench_hybrid_sst_disable,
 }
 
