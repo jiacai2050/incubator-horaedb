@@ -69,7 +69,6 @@ fn build_schema() -> Schema {
 }
 
 pub fn run(path: &str, sst_name: &str) {
-    println!("{path} {sst_name}");
     let store = LocalFileSystem::new_with_prefix(path).unwrap();
     let runtime = Arc::new(util::new_runtime(2));
 

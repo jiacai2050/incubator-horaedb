@@ -26,9 +26,9 @@ criterion_group! {
     targets = bench_hybrid_sst_enable , bench_hybrid_sst_disable,
 }
 
+#[cfg(flame_test)]
 criterion_main!(benches);
 
-#[cfg(flame_test)]
 fn main() {
     let guard = pprof::ProfilerGuardBuilder::default()
         .frequency(100)
@@ -36,11 +36,14 @@ fn main() {
         .build()
         .unwrap();
     println!("hello");
-    let args = std::env::args().collect::<Vec<String>>();
-    let path = &args[1];
-    let sst_name = &args[2];
-    for _ in 0..10 {
-        hybrid_bench::run(path, sst_name);
+    let path = std::env::var("TEST_PATH").unwrap();
+    let sst_name = std::env::var("TEST_SST").unwrap();
+    let test_times = std::env::var("TEST_TIMES").unwrap_or("10".to_string());
+    let test_times: usize = test_times.parse().unwrap();
+    println!("{path} {sst_name} {test_times}");
+
+    for _ in 0..test_times {
+        hybrid_bench::run(&path, &sst_name);
     }
     if let Ok(report) = guard.report().build() {
         let file = std::fs::File::create("/tmp/flamegraph.svg").unwrap();
