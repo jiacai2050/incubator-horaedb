@@ -22,10 +22,10 @@ serde = "1.0"
 serde_derive = "1.0"
 table_engine = { path = "../table_engine" }
 tokio = { version = "1.0", features = ["sync"] }
-pprof = { version = "0.10", features = ["flamegraph"] }
+pprof = { version = "0.10", features = ["flamegraph", "criterion"] }
+criterion = "0.3"
 
 [dev-dependencies]
-criterion = "0.3"
 
 [[bench]]
 name = "bench"

@@ -2822,6 +2822,7 @@ checksum = "1bba88ee898c63351101af3e60c66c5398c517681ce533eef8caff10ecf11ec1"
 dependencies = [
  "backtrace",
  "cfg-if 1.0.0",
+ "criterion",
  "findshlibs",
  "inferno",
  "libc",

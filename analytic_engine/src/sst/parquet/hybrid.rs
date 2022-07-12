@@ -2,8 +2,8 @@ use std::{collections::BTreeMap, convert::TryFrom, sync::Arc};
 
 use arrow_deps::arrow::{
     array::{
-        ArrayRef, DictionaryArray, Float64Array, ListArray, StringArray, TimestampMillisecondArray,
-        UInt64Array,
+        ArrayRef, DictionaryArray, Float64Array, ListArray, StringArray, StringBuilder,
+        TimestampMillisecondArray, UInt64Array, UInt64Builder,
     },
     datatypes::{
         Float64Type, Int8Type, Schema as ArrowSchema, TimeUnit, TimestampMillisecondType,
@@ -309,20 +309,24 @@ pub fn parse_hybrid_record_batch(
         let fields_in_one_tsid = field_col.value(row_idx);
 
         let num_row = timestamps_in_one_tsid.len();
-        let new_tsid_col = (0..num_row).map(|_| Some(tsid)).collect::<UInt64Array>();
+        let mut b = UInt64Builder::new(num_row);
+        for _ in 0..num_row {
+            b.append_value(tsid).unwrap();
+        }
+        // let new_tsid_col = (0..num_row).map(|_| Some(tsid)).collect::<UInt64Array>();
+        let new_tsid_col = b.finish();
 
         let mut all_cols = Vec::with_capacity(num_cols);
         all_cols.push(Arc::new(new_tsid_col) as ArrayRef);
         all_cols.push(timestamps_in_one_tsid);
         for c in &tag_cols {
-            let tagv = c.value(row_idx).to_string();
-            let array = (0..num_row)
-                .map(|_| Some(&tagv))
-                // .collect::<DictionaryArray<UInt64Type>>();
-                .collect::<StringArray>();
-            // let values = StringArray::from_iter_values([tagv]);
-            // let keys = UInt64Array::from_iter_values(0..num_row as u64);
-            // let array = DictionaryArray::<UInt64Type>::try_new(&keys, &values).unwrap();
+            let tagv = c.value(row_idx);
+            let mut b = StringBuilder::with_capacity(num_row, tagv.len() * num_row);
+            for _ in 0..num_row {
+                b.append_value(tagv).unwrap();
+            }
+            let array = b.finish();
+            // let array = (0..num_row).map(|_| Some(&tagv)).collect::<StringArray>();
 
             all_cols.push(Arc::new(array));
         }
