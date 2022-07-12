@@ -2,9 +2,10 @@ use std::{collections::BTreeMap, convert::TryFrom, sync::Arc};
 
 use arrow_deps::arrow::{
     array::{
-        ArrayRef, DictionaryArray, Float64Array, ListArray, StringArray, StringBuilder,
+        ArrayData, ArrayRef, DictionaryArray, Float64Array, ListArray, StringArray, StringBuilder,
         TimestampMillisecondArray, UInt64Array, UInt64Builder,
     },
+    buffer::MutableBuffer,
     datatypes::{
         Float64Type, Int8Type, Schema as ArrowSchema, TimeUnit, TimestampMillisecondType,
         UInt32Type, UInt64Type, UInt8Type,
@@ -321,13 +322,28 @@ pub fn parse_hybrid_record_batch(
         all_cols.push(timestamps_in_one_tsid);
         for c in &tag_cols {
             let tagv = c.value(row_idx);
-            let mut b = StringBuilder::with_capacity(num_row, tagv.len() * num_row);
-            for _ in 0..num_row {
-                b.append_value(tagv).unwrap();
-            }
-            let array = b.finish();
+            // method 1
             // let array = (0..num_row).map(|_| Some(&tagv)).collect::<StringArray>();
 
+            // method 2
+            // let mut b = StringBuilder::with_capacity(num_row, tagv.len() * num_row);
+            // for _ in 0..num_row {
+            //     b.append_value(tagv).unwrap();
+            // }
+            // let array = b.finish();
+
+            // method 3
+            let mut offsets_buffer = MutableBuffer::new((num_row + 1) * std::mem::size_of::<i32>());
+            let mut values_buffer = MutableBuffer::new((num_row) * tagv.len());
+            values_buffer.extend_from_slice(tagv.repeat(num_row).as_bytes());
+            offsets_buffer.extend((0..=(num_row * tagv.len()) as i32).step_by(tagv.len()));
+
+            let array_data = ArrayData::builder(DataType::Utf8)
+                .len(num_row)
+                .add_buffer(offsets_buffer.into())
+                .add_buffer(values_buffer.into());
+            let array_data = unsafe { array_data.build_unchecked() };
+            let array: StringArray = array_data.into();
             all_cols.push(Arc::new(array));
         }
         all_cols.push(fields_in_one_tsid);
