@@ -1,9 +1,9 @@
-use std::{collections::BTreeMap, convert::TryFrom, sync::Arc};
+use std::{collections::BTreeMap, convert::TryFrom, mem, sync::Arc};
 
 use arrow_deps::arrow::{
     array::{
-        ArrayData, ArrayRef, DictionaryArray, Float64Array, ListArray, StringArray, StringBuilder,
-        TimestampMillisecondArray, UInt64Array, UInt64Builder,
+        Array, ArrayData, ArrayRef, DictionaryArray, Float64Array, ListArray, StringArray,
+        StringBuilder, TimestampMillisecondArray, UInt64Array, UInt64Builder,
     },
     buffer::MutableBuffer,
     datatypes::{
@@ -221,6 +221,44 @@ pub fn to_hybrid_record_batch(
     build_new_record_format(schema, tag_names, records_by_tsid)
 }
 
+struct TagArrayBuilder {
+    num_rows: usize,
+    offsets: MutableBuffer,
+    values: MutableBuffer,
+    offset_so_far: i32,
+}
+
+impl TagArrayBuilder {
+    fn new(num_rows: usize, total_bytes: usize) -> Self {
+        Self {
+            num_rows,
+            offsets: MutableBuffer::with_capacity(mem::size_of::<i32>() * (num_rows + 1)),
+            values: MutableBuffer::with_capacity(total_bytes),
+            offset_so_far: 0,
+        }
+    }
+
+    fn extend_value(&mut self, value: &str, len: usize) {
+        self.values.extend_from_slice(value.repeat(len).as_bytes());
+        self.offsets
+            .extend((self.offset_so_far..(len * value.len()) as i32).step_by(value.len()));
+        self.offset_so_far += (len * value.len()) as i32;
+    }
+
+    fn build(mut self) -> ArrayRef {
+        let string_array: StringArray = {
+            self.offsets.push(self.values.len() as i32);
+            let array_data = ArrayData::builder(DataType::Utf8)
+                .len(self.num_rows)
+                .add_buffer(self.offsets.into())
+                .add_buffer(self.values.into());
+            let array_data = unsafe { array_data.build_unchecked() };
+            array_data.into()
+        };
+        Arc::new(string_array)
+    }
+}
+
 pub fn parse_hybrid_record_batch(
     schema: Schema,
     arrow_record_batch: ArrowRecordBatch,
@@ -228,26 +266,6 @@ pub fn parse_hybrid_record_batch(
     // let arrow_schema = arrow_record_batch.schema();
     // let schema = Schema::try_from(arrow_schema.clone()).unwrap();
     let arrow_schema = schema.to_arrow_schema_ref();
-    // let new_fields = arrow_schema
-    //     .fields()
-    //     .into_iter()
-    //     .map(|f| {
-    //         if ["tsid", "timestamp", "value"].contains(&f.name().as_str()) {
-    //             f.clone()
-    //         } else {
-    //             Field::new(
-    //                 f.name(),
-    //                 DataType::Dictionary(Box::new(DataType::UInt64),
-    // Box::new(DataType::Utf8)),                 false,
-    //             )
-    //         }
-    //     })
-    //     .collect::<Vec<_>>();
-    // let arrow_schema = Arc::new(ArrowSchema::new_with_metadata(
-    //     new_fields,
-    //     arrow_schema.metadata().clone(),
-    // ));
-
     let timestamp_idx = schema.timestamp_index();
     let tsid_idx = schema.index_of_tsid();
 
@@ -301,56 +319,81 @@ pub fn parse_hybrid_record_batch(
                 .unwrap()
         })
         .collect::<Vec<_>>();
-    let num_cols = tag_cols.len() + 3; // tsid + timestamp + value
 
+    let timestamp_array: TimestampMillisecondArray = {
+        let timestamp_data = timestamp_col.data();
+        let child_data = &timestamp_data.child_data()[0];
+        let num_rows = child_data.len();
+        let ts_buffer = &child_data.buffers()[0];
+        let array_data = ArrayData::builder(DataType::Timestamp(TimeUnit::Millisecond, None))
+            .len(num_rows)
+            .add_buffer(ts_buffer.clone());
+
+        unsafe { array_data.build_unchecked() }.into()
+    };
+    let (field_array, total_num_rows) = {
+        let child_data = &field_col.data().child_data()[0];
+        let num_rows = child_data.len();
+        let ts_buffer = &child_data.buffers()[0];
+        let array_data = ArrayData::builder(DataType::Float64)
+            .len(num_rows)
+            .add_buffer(ts_buffer.clone());
+
+        (
+            Float64Array::from(unsafe { array_data.build_unchecked() }),
+            num_rows,
+        )
+    };
     let mut new_batches = Vec::with_capacity(tsid_col.len());
+    let mut tag_builders = tag_cols
+        .iter()
+        .map(|c| {
+            let mut size = 0;
+            for row_idx in 0..tsid_col.len() {
+                let timestamps_in_one_tsid = timestamp_col.value(row_idx);
+                let tagv = c.value(row_idx);
+                size += tagv.len() * timestamps_in_one_tsid.len();
+            }
+            TagArrayBuilder::new(total_num_rows, size)
+        })
+        .collect::<Vec<_>>();
+    let mut tsid_buffer = MutableBuffer::with_capacity(mem::size_of::<u64>() * total_num_rows);
     for row_idx in 0..tsid_col.len() {
         let tsid = tsid_col.value(row_idx);
         let timestamps_in_one_tsid = timestamp_col.value(row_idx);
-        let fields_in_one_tsid = field_col.value(row_idx);
+        let current_num_rows = timestamps_in_one_tsid.len();
+        tsid_buffer.extend((0..current_num_rows).map(|_| tsid));
 
-        let num_row = timestamps_in_one_tsid.len();
-        let mut b = UInt64Builder::new(num_row);
-        for _ in 0..num_row {
-            b.append_value(tsid).unwrap();
-        }
-        // let new_tsid_col = (0..num_row).map(|_| Some(tsid)).collect::<UInt64Array>();
-        let new_tsid_col = b.finish();
-
-        let mut all_cols = Vec::with_capacity(num_cols);
-        all_cols.push(Arc::new(new_tsid_col) as ArrayRef);
-        all_cols.push(timestamps_in_one_tsid);
-        for c in &tag_cols {
+        for (idx, c) in tag_cols.iter().enumerate() {
             let tagv = c.value(row_idx);
-            // method 1
-            // let array = (0..num_row).map(|_| Some(&tagv)).collect::<StringArray>();
-
-            // method 2
-            // let mut b = StringBuilder::with_capacity(num_row, tagv.len() * num_row);
-            // for _ in 0..num_row {
-            //     b.append_value(tagv).unwrap();
-            // }
-            // let array = b.finish();
-
-            // method 3
-            let mut offsets_buffer = MutableBuffer::new((num_row + 1) * std::mem::size_of::<i32>());
-            let mut values_buffer = MutableBuffer::new((num_row) * tagv.len());
-            values_buffer.extend_from_slice(tagv.repeat(num_row).as_bytes());
-            offsets_buffer.extend((0..=(num_row * tagv.len()) as i32).step_by(tagv.len()));
-
-            let array_data = ArrayData::builder(DataType::Utf8)
-                .len(num_row)
-                .add_buffer(offsets_buffer.into())
-                .add_buffer(values_buffer.into());
-            let array_data = unsafe { array_data.build_unchecked() };
-            let array: StringArray = array_data.into();
-            all_cols.push(Arc::new(array));
+            tag_builders[idx].extend_value(tagv, current_num_rows);
         }
-        all_cols.push(fields_in_one_tsid);
-        let batch = ArrowRecordBatch::try_new(arrow_schema.clone(), all_cols).unwrap();
-        new_batches.push(batch);
     }
+    let tsid_array = {
+        let data = ArrayData::builder(DataType::UInt64)
+            .len(total_num_rows)
+            .add_buffer(tsid_buffer.into());
+        let data = unsafe { data.build_unchecked() };
+        UInt64Array::from(data)
+    };
 
+    let all_cols = vec![
+        vec![
+            Arc::new(tsid_array) as ArrayRef,
+            Arc::new(timestamp_array) as ArrayRef,
+        ],
+        tag_builders
+            .into_iter()
+            .map(|b| b.build())
+            .collect::<Vec<_>>(),
+        vec![Arc::new(field_array) as ArrayRef],
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+
+    let batch = ArrowRecordBatch::try_new(arrow_schema.clone(), all_cols).unwrap();
+    new_batches.push(batch);
     ArrowRecordBatch::concat(&arrow_schema, &new_batches)
         .map_err(|e| Box::new(e) as _)
         .context(EncodeRecordBatch)

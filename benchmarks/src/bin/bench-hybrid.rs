@@ -30,11 +30,11 @@ criterion_group! {
 criterion_main!(benches);
 
 fn main() {
-    let guard = pprof::ProfilerGuardBuilder::default()
-        .frequency(100)
-        // .blocklist(&["libc", "libgcc", "pthread", "vdso"])
-        .build()
-        .unwrap();
+    // let guard = pprof::ProfilerGuardBuilder::default()
+    //     .frequency(100)
+    //     // .blocklist(&["libc", "libgcc", "pthread", "vdso"])
+    //     .build()
+    //     .unwrap();
     println!("hello");
     let path = std::env::var("TEST_PATH").unwrap();
     let sst_name = std::env::var("TEST_SST").unwrap();
@@ -45,10 +45,10 @@ fn main() {
     for _ in 0..test_times {
         hybrid_bench::run(&path, &sst_name);
     }
-    if let Ok(report) = guard.report().build() {
-        let file = std::fs::File::create("/tmp/flamegraph.svg").unwrap();
-        report.flamegraph(file).unwrap();
-    };
+    // if let Ok(report) = guard.report().build() {
+    //     let file = std::fs::File::create("/tmp/flamegraph.svg").unwrap();
+    //     report.flamegraph(file).unwrap();
+    // };
 }
 // fn main() {
 //     println!("hello");

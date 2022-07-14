@@ -74,7 +74,7 @@ fn main() {
     // Setup tracing.
     let _writer_guard = setup::setup_tracing(&config);
 
-    panic::set_panic_hook(false);
+    panic::set_panic_hook(true);
 
     // Log version.
     info!("version:{}", version);
