@@ -240,9 +240,10 @@ impl TagArrayBuilder {
 
     fn extend_value(&mut self, value: &str, len: usize) {
         self.values.extend_from_slice(value.repeat(len).as_bytes());
+        let new_offset = self.offset_so_far + (len * value.len()) as i32;
         self.offsets
-            .extend((self.offset_so_far..(len * value.len()) as i32).step_by(value.len()));
-        self.offset_so_far += (len * value.len()) as i32;
+            .extend((self.offset_so_far..new_offset).step_by(value.len()));
+        self.offset_so_far = new_offset;
     }
 
     fn build(mut self) -> ArrayRef {
