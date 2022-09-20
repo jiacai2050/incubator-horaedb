@@ -1,0 +1,43 @@
+name: TSBS Benchmark
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+      - name: Cache Rust Dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo
+            ./target
+          key: rust-${{ runner.os }}-release-${{ hashFiles('rust-toolchain') }}-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            rust-${{ runner.os }}-release-${{ hashFiles('rust-toolchain') }}-
+            rust-${{ runner.os }}-release-
+            rust-${{ runner.os }}
+      - name: Build server
+        run: |
+          make build
+  prepare-data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Build server
+        run: |
+          git clone -b feat-ceresdb --single-branch https://github.com/CeresDB/tsbs.git
+          cd tsbs
+          go build ./cmd/tsbs_generate_data/
+          go build ./cmd/tsbs_load_ceresdb
+          go build ./cmd/tsbs_run_queries_ceresdb/
+  run-benchmark:
+    runs-on: ubuntu-latest
+    needs: [build-server, prepare-data]
+    steps:
+      - run: |
+          echo "run benchmark"
