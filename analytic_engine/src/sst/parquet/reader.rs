@@ -24,7 +24,7 @@ use common_types::{
     record_batch::{ArrowRecordBatchProjector, RecordBatchWithKey},
     schema::Schema,
 };
-use common_util::runtime::Runtime;
+use common_util::{runtime::Runtime, time::InstantExt};
 use futures::Stream;
 use log::{debug, error, trace};
 use object_store::{ObjectStoreRef, Path};
@@ -54,6 +54,7 @@ pub async fn read_sst_meta(
     meta_cache: &Option<MetaCacheRef>,
     data_cache: &Option<DataCacheRef>,
 ) -> Result<(CachableSerializedFileReader<SliceableCursor>, SstMetaData)> {
+    let begin_instant = Instant::now();
     let get_result = storage
         .get(path)
         .await
@@ -61,6 +62,12 @@ pub async fn read_sst_meta(
         .with_context(|| ReadPersist {
             path: path.to_string(),
         })?;
+    debug!(
+        "read sst meta, get_result cost:{}ms, data:{:?}",
+        begin_instant.saturating_elapsed().as_millis(),
+        get_result
+    );
+
     // TODO: The `ChunkReader` (trait from parquet crate) doesn't support async
     // read. So under this situation it would be better to pass a local file to
     // it, avoiding consumes lots of memory. Once parquet support stream data source
@@ -73,6 +80,10 @@ pub async fn read_sst_meta(
             path: path.to_string(),
         })?
         .to_vec();
+    debug!(
+        "read sst meta, get_bytes cost:{}ms",
+        begin_instant.saturating_elapsed().as_millis(),
+    );
     let bytes = SliceableCursor::new(Arc::new(bytes));
 
     // generate the file reader
@@ -101,6 +112,10 @@ pub async fn read_sst_meta(
             .map_err(|e| Box::new(e) as _)
             .context(DecodeSstMeta)?
     };
+    debug!(
+        "read sst meta, read kvdata cost:{}ms",
+        begin_instant.saturating_elapsed().as_millis(),
+    );
 
     Ok((file_reader, sst_meta))
 }
@@ -162,8 +177,10 @@ impl<'a> ParquetSstReader<'a> {
     }
 
     fn read_record_batches(&mut self, tx: Sender<Result<RecordBatchWithKey>>) -> Result<()> {
+        let begin_instant = Instant::now();
         let path = self.path.to_string();
         ensure!(self.file_reader.is_some(), ReadAgain { path });
+        debug!("read_record_batches begin, path is:{}", path);
 
         let file_reader = self.file_reader.take().unwrap();
         let batch_size = self.batch_size;
@@ -232,6 +249,10 @@ impl<'a> ParquetSstReader<'a> {
             }
         });
 
+        debug!(
+            "read_record_batches done, cost:{}ms",
+            begin_instant.saturating_elapsed().as_millis(),
+        );
         Ok(())
     }
 

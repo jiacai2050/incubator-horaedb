@@ -4816,6 +4816,7 @@ dependencies = [
  "arrow_deps 0.1.0",
  "async-trait",
  "avro-rs",
+ "bytes 1.2.1",
  "catalog",
  "ceresdbproto_deps",
  "cluster",

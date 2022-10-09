@@ -23,6 +23,8 @@ use warp::{
 
 use crate::{consts, context::RequestContext, error, handlers, instance::InstanceRef, metrics};
 
+const MAX_BODY_SIZE: u64 = 4096;
+
 #[derive(Debug)]
 pub struct Config {
     pub ip: String,
@@ -119,13 +121,14 @@ impl<Q: QueryExecutor + 'static> Service<Q> {
     fn sql(&self) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
         warp::path!("sql")
             .and(warp::post())
-            // TODO(yingwen): content length limit
-            .and(warp::body::json())
+            .and(warp::body::content_length_limit(MAX_BODY_SIZE).and(warp::body::bytes()))
             .and(self.with_context())
             .and(self.with_instance())
-            .and_then(|req, ctx, instance| async {
+            .and_then(|bytes: bytes::Bytes, ctx, instance| async move {
                 // TODO(yingwen): Wrap common logic such as metrics, trace and error log
-                let result = handlers::sql::handle_sql(ctx, instance, req)
+                let sql = String::from_utf8_lossy(bytes.as_ref()).to_string();
+
+                let result = handlers::sql::handle_sql(ctx, instance, sql.into())
                     .await
                     .map_err(|e| {
                         // TODO(yingwen): Maybe truncate and print the sql

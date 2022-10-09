@@ -98,8 +98,10 @@ impl Executor for ExecutorImpl {
         let physical_plan = optimize_plan(ctx, plan).await?;
 
         debug!(
-            "Executor physical optimization finished, request_id:{}, physical_plan: {:?}",
-            request_id, physical_plan
+            "Executor physical optimization finished, request_id:{}, cost:{}ms, physical_plan: {:?}",
+            request_id,
+            begin_instant.saturating_elapsed().as_millis(),
+            physical_plan
         );
 
         let stream = physical_plan.execute().context(ExecutePhysical)?;

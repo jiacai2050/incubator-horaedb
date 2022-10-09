@@ -1,13 +1,13 @@
 // Copyright 2022 CeresDB Project Authors. Licensed under Apache-2.0.
 
-use std::ops::Bound;
+use std::{ops::Bound, time::Instant};
 
 use common_types::{
     projected_schema::ProjectedSchema, record_batch::RecordBatchWithKey, SequenceNumber,
 };
-use common_util::define_result;
+use common_util::{define_result, time::InstantExt};
 use futures::stream::{self, Stream, StreamExt};
-use log::{error, trace};
+use log::{debug, error, trace};
 use object_store::ObjectStoreRef;
 use snafu::{Backtrace, OptionExt, ResultExt, Snafu};
 use table_engine::{
@@ -230,6 +230,8 @@ pub async fn stream_from_sst_file(
     sst_reader_options: &SstReaderOptions,
     store: &ObjectStoreRef,
 ) -> Result<SequencedRecordBatchStream> {
+    let begin_instant = Instant::now();
+
     sst_file.read_meter().mark();
     let path = sst_util::new_sst_file_path(space_id, table_id, sst_file.id());
     let mut sst_reader = sst_factory
@@ -238,8 +240,16 @@ pub async fn stream_from_sst_file(
             options: sst_reader_options.clone(),
         })?;
     let meta = sst_reader.meta_data().await.context(ReadSstMeta)?;
+    debug!(
+        "stream from sst file, read metadata cost:{}ms",
+        begin_instant.saturating_elapsed().as_millis(),
+    );
     let max_seq = meta.max_sequence;
     let sst_stream = sst_reader.read().await.context(ReadSstData)?;
+    debug!(
+        "stream from sst file, raw read cost:{}ms",
+        begin_instant.saturating_elapsed().as_millis(),
+    );
 
     let stream = Box::new(sst_stream.map(move |v| {
         v.map(|record_batch| SequencedRecordBatch {

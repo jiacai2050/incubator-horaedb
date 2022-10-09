@@ -43,6 +43,7 @@ table_engine = { path = "../table_engine" }
 tokio = { version = "1.0", features = ["full"] }
 twox-hash = "1.6"
 warp = "0.3"
+bytes = "1.1.0"
 
 [dev-dependencies]
 sql = { path = "../sql" , features=["test"]}

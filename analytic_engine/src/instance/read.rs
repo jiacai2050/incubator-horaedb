@@ -6,13 +6,14 @@ use std::{
     collections::BTreeMap,
     pin::Pin,
     task::{Context, Poll},
+    time::Instant,
 };
 
 use common_types::{
     projected_schema::ProjectedSchema, record_batch::RecordBatch, schema::RecordSchema,
     time::TimeRange,
 };
-use common_util::{define_result, runtime::Runtime};
+use common_util::{define_result, runtime::Runtime, time::InstantExt};
 use futures::stream::Stream;
 use log::{debug, error, trace};
 use snafu::{ResultExt, Snafu};
@@ -150,6 +151,8 @@ impl Instance {
         table_options: &TableOptions,
     ) -> Result<Vec<DedupIterator<MergeIterator>>> {
         // Current visible sequence
+        let begin_instant = Instant::now();
+
         let sequence = table_data.last_sequence();
         let projected_schema = request.projected_schema.clone();
         let sst_reader_options = SstReaderOptions {
@@ -167,6 +170,9 @@ impl Instance {
         let version = table_data.current_version();
         let read_views = self.partition_ssts_and_memtables(time_range, version, table_options);
 
+        for view in &read_views {
+            debug!("read_views:{:?}", view.leveled_ssts);
+        }
         let mut iters = Vec::with_capacity(read_views.len());
         for read_view in read_views {
             let merge_config = MergeConfig {
@@ -199,6 +205,10 @@ impl Instance {
             iters.push(dedup_iter);
         }
 
+        debug!(
+            "build merge iter done. cost:{}ms",
+            begin_instant.saturating_elapsed().as_millis(),
+        );
         Ok(iters)
     }
 
