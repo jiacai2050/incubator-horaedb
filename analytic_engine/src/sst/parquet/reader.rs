@@ -20,10 +20,13 @@ use common_types::{
 use common_util::runtime::Runtime;
 use futures::Stream;
 use log::{debug, error, trace};
-use object_store::{ObjectStoreRef, Path};
+use object_store::{GetResult, ObjectStoreRef, Path};
 use parquet::{
     arrow::{ArrowReader, ParquetFileArrowReader, ProjectionMask},
-    file::{metadata::RowGroupMetaData, reader::FileReader},
+    file::{
+        metadata::RowGroupMetaData,
+        reader::{ChunkReader, FileReader, Length},
+    },
 };
 use parquet_ext::{
     reverse_reader::Builder as ReverseRecordBatchReaderBuilder, CacheableSerializedFileReader,
@@ -31,7 +34,10 @@ use parquet_ext::{
 };
 use snafu::{ensure, OptionExt, ResultExt};
 use table_engine::predicate::PredicateRef;
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::{
+    mpsc::{self, Receiver, Sender},
+    Mutex,
+};
 
 use crate::{
     sst::{
@@ -44,6 +50,36 @@ use crate::{
 };
 
 const DEFAULT_CHANNEL_CAP: usize = 1000;
+
+struct GetResultReader {
+    inner: Mutex<GetResult>,
+    bytes: Option<Bytes>,
+}
+
+impl GetResultReader {
+    fn read_bytes(&self) -> Result<()> {
+        todo!()
+    }
+}
+impl Length for GetResultReader {
+    fn len(&self) -> u64 {
+        if self.bytes.is_none() {
+            _ = self.read_bytes();
+        }
+        self.bytes.as_ref().unwrap().len() as u64
+    }
+}
+
+impl ChunkReader for GetResultReader {
+    type T = common_types::bytes::buf::Reader<Bytes>;
+
+    fn get_read(&self, start: u64, length: usize) -> parquet::errors::Result<Self::T> {
+        if self.bytes.is_none() {
+            _ = self.read_bytes();
+        }
+        todo!()
+    }
+}
 
 pub async fn read_sst_meta(
     storage: &ObjectStoreRef,
