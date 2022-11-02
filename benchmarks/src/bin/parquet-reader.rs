@@ -21,7 +21,8 @@ fn main() {
     let config = init_bench();
     let bench = ParquetBench::new(config.sst_bench);
 
-    for _ in 0..10 {
+    for i in 0..10 {
+        println!("{i}...");
         bench.run_bench();
     }
     println!("done");

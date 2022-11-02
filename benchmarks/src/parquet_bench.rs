@@ -4,6 +4,7 @@
 
 use std::{sync::Arc, time::Instant};
 
+use arrow::array::Int64Array;
 use common_types::schema::Schema;
 use common_util::runtime::Runtime;
 use futures::TryStreamExt;
@@ -98,6 +99,7 @@ impl ParquetBench {
             let arrow_reader =
                 ParquetRecordBatchReaderBuilder::try_new(get_result.bytes().await.unwrap())
                     .unwrap()
+                    .with_batch_size(self.batch_size)
                     .build()
                     .unwrap();
             let filter_cost = filter_begin_instant.elapsed();
@@ -105,17 +107,27 @@ impl ParquetBench {
             let iter_begin_instant = Instant::now();
             let mut total_rows = 0;
             let mut batch_num = 0;
+            let mut hit = 0;
             for record_batch in arrow_reader {
-                let num_rows = record_batch.unwrap().num_rows();
+                let batch = record_batch.unwrap();
+                let index_code = &batch.columns()[3];
+                let index_code = index_code.as_any().downcast_ref::<Int64Array>().unwrap();
+                if index_code.values().contains(&55489) {
+                    hit += 1;
+                }
+                let num_rows = batch.num_rows();
+
                 total_rows += num_rows;
                 batch_num += 1;
             }
 
             info!(
-                "\nParquetBench Sync total rows of sst:{}, total batch num:{},
+                "\nParquetBench Sync total rows of sst:{}, batch:{}, hit:{}, hit/batch:{},
                 open cost:{:?}, filter cost:{:?}, iter cost:{:?}",
                 total_rows,
                 batch_num,
+                hit,
+                hit as f64 / batch_num as f64,
                 open_cost,
                 filter_cost,
                 iter_begin_instant.elapsed(),
