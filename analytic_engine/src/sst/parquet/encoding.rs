@@ -364,7 +364,7 @@ impl HybridRecordEncoder {
             } else {
                 // TODO: support non-string key columns
                 ensure!(
-                    matches!(col.data_type, DatumKind::String),
+                    matches!(col.data_type, DatumKind::Int64),
                     StringKeyColumnRequired {
                         type_name: col.data_type.to_string(),
                     }

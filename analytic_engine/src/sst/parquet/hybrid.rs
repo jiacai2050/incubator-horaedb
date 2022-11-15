@@ -4,8 +4,8 @@ use std::{collections::BTreeMap, sync::Arc};
 
 use arrow::{
     array::{
-        Array, ArrayData, ArrayDataBuilder, ArrayRef, BinaryArray, ListArray, StringArray,
-        UInt64Array,
+        Array, ArrayData, ArrayDataBuilder, ArrayRef, BinaryArray, Int64Array, ListArray,
+        StringArray, UInt64Array,
     },
     bitmap::Bitmap,
     buffer::{Buffer, MutableBuffer},
@@ -86,12 +86,12 @@ impl ArrayHandle {
 /// `TsidBatch` is used to collect column data for the same TSID
 #[derive(Debug)]
 struct TsidBatch {
-    non_collapsible_col_values: Vec<String>,
+    non_collapsible_col_values: Vec<i64>,
     collapsible_col_arrays: Vec<ArrayHandle>,
 }
 
 impl TsidBatch {
-    fn new(non_collapsible_col_values: Vec<String>, collapsible_col_arrays: Vec<ArrayRef>) -> Self {
+    fn new(non_collapsible_col_values: Vec<i64>, collapsible_col_arrays: Vec<ArrayRef>) -> Self {
         Self {
             non_collapsible_col_values,
             collapsible_col_arrays: collapsible_col_arrays
@@ -456,7 +456,7 @@ fn build_hybrid_record(
         .zip(non_collapsible_col_types.iter().map(|n| n.idx))
         .map(|(c, idx)| IndexedArray {
             idx,
-            array: Arc::new(StringArray::from(c)) as ArrayRef,
+            array: Arc::new(Int64Array::from(c)) as ArrayRef,
         })
         .collect::<Vec<_>>();
     let collapsible_col_arrays = collapsible_col_arrays
@@ -514,7 +514,7 @@ pub fn convert_to_hybrid_record(
                 record_batch
                     .column(col.idx)
                     .as_any()
-                    .downcast_ref::<StringArray>()
+                    .downcast_ref::<Int64Array>()
                     .expect("checked in HybridRecordEncoder::try_new")
             })
             .collect::<Vec<_>>();
@@ -542,7 +542,7 @@ pub fn convert_to_hybrid_record(
                 TsidBatch::new(
                     non_collapsible_col_values
                         .iter()
-                        .map(|col| col.value(offset).to_string())
+                        .map(|col| col.value(offset))
                         .collect(),
                     collapsible_col_types
                         .iter()
