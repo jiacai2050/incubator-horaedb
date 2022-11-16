@@ -350,6 +350,7 @@ impl ListArrayBuilder {
 
         for array_handle in &self.list_of_arrays {
             let array = self.convert_to_variable_size_array(array_handle)?;
+            log::info!("array_handle is:{:?}", array_handle);
             for slice_arg in &array_handle.slice_args {
                 let start = array.value_offsets()[slice_arg.offset];
                 let end = array.value_offsets()[slice_arg.offset + slice_arg.length];
