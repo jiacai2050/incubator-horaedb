@@ -357,8 +357,8 @@ impl ListArrayBuilder {
                 if slice_arg.offset + slice_arg.length > value_offsets.len() {
                     println!("array handle: {:?}", array_handle);
                 }
-                if end_index > value_offsets.len() {
-                    end_index = value_offsets.len();
+                if end_index > value_offsets.len() - 1 {
+                    end_index = value_offsets.len() - 1;
                 }
                 let start = value_offsets[slice_arg.offset];
                 let end = value_offsets[end_index];
