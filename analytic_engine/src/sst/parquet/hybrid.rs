@@ -351,8 +351,12 @@ impl ListArrayBuilder {
         for array_handle in &self.list_of_arrays {
             let array = self.convert_to_variable_size_array(array_handle)?;
             for slice_arg in &array_handle.slice_args {
-                let start = array.value_offsets()[slice_arg.offset];
-                let end = array.value_offsets()[slice_arg.offset + slice_arg.length];
+                let value_offsets = array.value_offsets();
+                if slice_arg.offset + slice_arg.length > value_offsets.len() {
+                    println!("array handle: {:?}", array_handle);
+                }
+                let start = value_offsets[slice_arg.offset];
+                let end = value_offsets[slice_arg.offset + slice_arg.length];
 
                 offsets_length_total += slice_arg.length;
                 values_length_total += (end - start) as usize;
@@ -696,12 +700,19 @@ mod tests {
                     Some("eeee"),
                     Some("eee"),
                 ]),
-                vec![(0, 1).into()],
+                vec![(2, 2).into()],
             ),
         ];
 
-        let string_data = string_array(vec![Some("bb"), None, Some("ccc"), Some("d"), Some("a")]);
-        let offsets: [i32; 3] = [0, 4, 5];
+        let string_data = string_array(vec![
+            Some("bb"),
+            None,
+            Some("ccc"),
+            Some("d"),
+            None,
+            Some("ccc"),
+        ]);
+        let offsets: [i32; 3] = [0, 4, 6];
         let array_data = ArrayData::builder(DataType::List(Box::new(Field::new(
             LIST_ITEM_NAME,
             DataType::Utf8,
