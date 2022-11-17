@@ -389,8 +389,17 @@ impl ListArrayBuilder {
             for slice_arg in &array_handle.slice_args {
                 *length_so_far += slice_arg.length as i32;
 
+                // FIXME: workaround
+                let value_offsets = array.value_offsets();
+                let mut end_index = slice_arg.offset + slice_arg.length;
+                if slice_arg.offset + slice_arg.length > value_offsets.len() {
+                    println!("array handle: {:?}", array_handle);
+                }
+                if end_index > value_offsets.len() - 1 {
+                    end_index = value_offsets.len() - 1;
+                }
                 let start = array.value_offsets()[slice_arg.offset];
-                let end = array.value_offsets()[slice_arg.offset + slice_arg.length];
+                let end = array.value_offsets()[end_index];
 
                 for i in (slice_arg.offset as usize)..(slice_arg.offset + slice_arg.length as usize)
                 {
