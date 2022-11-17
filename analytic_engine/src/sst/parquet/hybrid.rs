@@ -352,11 +352,16 @@ impl ListArrayBuilder {
             let array = self.convert_to_variable_size_array(array_handle)?;
             for slice_arg in &array_handle.slice_args {
                 let value_offsets = array.value_offsets();
+                // FIXME: workaround
+                let mut end_index = slice_arg.offset + slice_arg.length;
                 if slice_arg.offset + slice_arg.length > value_offsets.len() {
                     println!("array handle: {:?}", array_handle);
                 }
+                if end_index > value_offsets.len() {
+                    end_index = value_offsets.len();
+                }
                 let start = value_offsets[slice_arg.offset];
-                let end = value_offsets[slice_arg.offset + slice_arg.length];
+                let end = value_offsets[end_index];
 
                 offsets_length_total += slice_arg.length;
                 values_length_total += (end - start) as usize;
