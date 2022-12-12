@@ -22,7 +22,10 @@ use snafu::{ensure, Backtrace, ResultExt, Snafu};
 use tokio::{
     fs::{File, OpenOptions},
     io::{AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    sync::Mutex,
+    sync::{
+        watch::{self, Receiver},
+        Mutex,
+    },
 };
 use upstream::{
     path::Path, Error as ObjectStoreError, GetResult, ListResult, MultipartId, ObjectMeta,
@@ -117,7 +120,8 @@ struct DiskCache {
     root_dir: String,
     cap: usize,
     // Cache key is used as filename on disk.
-    cache: Mutex<LruCache<String, ()>>,
+    // When value is not None, this means that there are waiting threads
+    cache: Mutex<LruCache<String, Option<Receiver<Bytes>>>>,
 }
 
 impl DiskCache {
@@ -156,7 +160,7 @@ impl DiskCache {
         if let Some(value) = value {
             self.persist_bytes(&key, value).await?;
         }
-        cache.push(key, ());
+        cache.push(key, None);
 
         Ok(())
     }
@@ -171,11 +175,19 @@ impl DiskCache {
 
     async fn get(&self, key: &str) -> Result<Option<Bytes>> {
         let mut cache = self.cache.lock().await;
-        if cache.get(key).is_some() {
+        if let Some(bytes_or_waiting) = cache.get(key) {
+            if let Some(mut rx) = bytes_or_waiting.clone() {
+                if rx.changed().await.is_ok() {
+                    return Ok(Some(rx.borrow().clone()));
+                }
+            }
             // TODO: release lock when doing IO
             return self.read_bytes(key).await.map(Some);
         }
 
+        let (tx, rx) = watch::channel(Bytes::default());
+
+        cache.get_or_insert(key.to_string(), || Some(rx));
         Ok(None)
     }
 

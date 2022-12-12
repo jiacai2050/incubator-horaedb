@@ -1064,6 +1064,7 @@ dependencies = [
  "bytes_ext 1.0.0-alpha01",
  "chrono",
  "datafusion",
+ "log",
  "murmur3",
  "paste 1.0.8",
  "prost",
