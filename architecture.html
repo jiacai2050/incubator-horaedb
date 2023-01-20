@@ -1,0 +1,429 @@
+<!DOCTYPE HTML>
+<html lang="en" class="sidebar-visible no-js light">
+    <head>
+        <!-- Book generated using mdBook -->
+        <meta charset="UTF-8">
+        <title>Architecture - CeresDB Documentation</title>
+        <!-- Custom HTML head -->
+        <meta content="text/html; charset=utf-8" http-equiv="Content-Type">
+        <meta name="description" content="">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta name="theme-color" content="#ffffff" />
+
+        <link rel="icon" href="favicon.svg">
+        <link rel="shortcut icon" href="favicon.png">
+        <link rel="stylesheet" href="css/variables.css">
+        <link rel="stylesheet" href="css/general.css">
+        <link rel="stylesheet" href="css/chrome.css">
+        <link rel="stylesheet" href="css/print.css" media="print">
+        <!-- Fonts -->
+        <link rel="stylesheet" href="FontAwesome/css/font-awesome.css">
+        <link rel="stylesheet" href="fonts/fonts.css">
+        <!-- Highlight.js Stylesheets -->
+        <link rel="stylesheet" href="highlight.css">
+        <link rel="stylesheet" href="tomorrow-night.css">
+        <link rel="stylesheet" href="ayu-highlight.css">
+
+        <!-- Custom theme stylesheets -->
+    </head>
+    <body>
+        <!-- Provide site root to javascript -->
+        <script type="text/javascript">
+            var path_to_root = "";
+            var default_theme = window.matchMedia("(prefers-color-scheme: dark)").matches ? "navy" : "light";
+        </script>
+
+        <!-- Work around some values being stored in localStorage wrapped in quotes -->
+        <script type="text/javascript">
+            try {
+                var theme = localStorage.getItem('mdbook-theme');
+                var sidebar = localStorage.getItem('mdbook-sidebar');
+
+                if (theme.startsWith('"') && theme.endsWith('"')) {
+                    localStorage.setItem('mdbook-theme', theme.slice(1, theme.length - 1));
+                }
+
+                if (sidebar.startsWith('"') && sidebar.endsWith('"')) {
+                    localStorage.setItem('mdbook-sidebar', sidebar.slice(1, sidebar.length - 1));
+                }
+            } catch (e) { }
+        </script>
+
+        <!-- Set the theme before any content is loaded, prevents flash -->
+        <script type="text/javascript">
+            var theme;
+            try { theme = localStorage.getItem('mdbook-theme'); } catch(e) { }
+            if (theme === null || theme === undefined) { theme = default_theme; }
+            var html = document.querySelector('html');
+            html.classList.remove('no-js')
+            html.classList.remove('light')
+            html.classList.add(theme);
+            html.classList.add('js');
+        </script>
+
+        <!-- Hide / unhide sidebar before it is displayed -->
+        <script type="text/javascript">
+            var html = document.querySelector('html');
+            var sidebar = 'hidden';
+            if (document.body.clientWidth >= 1080) {
+                try { sidebar = localStorage.getItem('mdbook-sidebar'); } catch(e) { }
+                sidebar = sidebar || 'visible';
+            }
+            html.classList.remove('sidebar-visible');
+            html.classList.add("sidebar-" + sidebar);
+        </script>
+
+        <nav id="sidebar" class="sidebar" aria-label="Table of contents">
+            <div class="sidebar-scrollbox">
+                <ol class="chapter"><li class="chapter-item affix "><li class="part-title">Introduction</li><li class="chapter-item "><a href="about.html"><strong aria-hidden="true">1.</strong> What is CeresDB</a></li><li class="chapter-item "><a href="quick_start.html"><strong aria-hidden="true">2.</strong> Quick Start</a></li><li class="chapter-item affix "><li class="part-title">User Guide</li><li class="chapter-item "><a href="sql/index.html"><strong aria-hidden="true">3.</strong> SQL Syntax</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="sql/model/index.html"><strong aria-hidden="true">3.1.</strong> Data Model</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="sql/model/data_types.html"><strong aria-hidden="true">3.1.1.</strong> Data Types</a></li><li class="chapter-item "><a href="sql/model/special_columns.html"><strong aria-hidden="true">3.1.2.</strong> Special Columns</a></li></ol></li><li class="chapter-item "><a href="sql/identifier.html"><strong aria-hidden="true">3.2.</strong> Identifier</a></li><li class="chapter-item "><a href="sql/ddl/index.html"><strong aria-hidden="true">3.3.</strong> Data Definition Statements</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="sql/ddl/create_table.html"><strong aria-hidden="true">3.3.1.</strong> CREATE TABLE</a></li><li class="chapter-item "><a href="sql/ddl/alter_table.html"><strong aria-hidden="true">3.3.2.</strong> ALTER TABLE</a></li></ol></li><li class="chapter-item "><a href="sql/dml/index.html"><strong aria-hidden="true">3.4.</strong> Data Manipulation Statements</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="sql/dml/insert.html"><strong aria-hidden="true">3.4.1.</strong> INSERT</a></li><li class="chapter-item "><a href="sql/dml/select.html"><strong aria-hidden="true">3.4.2.</strong> SELECT</a></li></ol></li><li class="chapter-item "><a href="sql/utility.html"><strong aria-hidden="true">3.5.</strong> Utility Statements</a></li><li class="chapter-item "><a href="sql/engine_options.html"><strong aria-hidden="true">3.6.</strong> Engine Options</a></li></ol></li><li class="chapter-item "><a href="deploy/index.html"><strong aria-hidden="true">4.</strong> Deployment</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="deploy/platform.html"><strong aria-hidden="true">4.1.</strong> Supported Platform</a></li><li class="chapter-item "><a href="deploy/static_routing.html"><strong aria-hidden="true">4.2.</strong> Static Routing</a></li><li class="chapter-item "><a href="deploy/dynamic_routing.html"><strong aria-hidden="true">4.3.</strong> Dynamic Routing</a></li></ol></li><li class="chapter-item "><a href="sdk.html"><strong aria-hidden="true">5.</strong> Develop Kits</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="sdk/java.html"><strong aria-hidden="true">5.1.</strong> Java SDK</a></li><li class="chapter-item "><a href="sdk/go.html"><strong aria-hidden="true">5.2.</strong> Go SDK</a></li><li class="chapter-item "><a href="sdk/python.html"><strong aria-hidden="true">5.3.</strong> Python SDK</a></li><li class="chapter-item "><a href="sdk/rust.html"><strong aria-hidden="true">5.4.</strong> Rust SDK</a></li></ol></li><li class="chapter-item "><a href="operation/index.html"><strong aria-hidden="true">6.</strong> Operation</a><a class="toggle"><div>❱</div></a></li><li><ol class="section"><li class="chapter-item "><a href="operation/table.html"><strong aria-hidden="true">6.1.</strong> Table</a></li><li class="chapter-item "><a href="operation/system_table.html"><strong aria-hidden="true">6.2.</strong> System Table</a></li><li class="chapter-item "><a href="operation/block_list.html"><strong aria-hidden="true">6.3.</strong> Block List</a></li><li class="chapter-item "><a href="operation/observability.html"><strong aria-hidden="true">6.4.</strong> Observability</a></li></ol></li><li class="chapter-item "><li class="part-title">Dev Guide</li><li class="chapter-item "><a href="dev/platform.html"><strong aria-hidden="true">7.</strong> Supported Platform</a></li><li class="chapter-item "><a href="dev/compile_run.html"><strong aria-hidden="true">8.</strong> Compile and Running</a></li><li class="chapter-item "><a href="dev/conventional_commit.html"><strong aria-hidden="true">9.</strong> Conventional Commit</a></li><li class="chapter-item "><a href="dev/style_guide.html"><strong aria-hidden="true">10.</strong> Style guide</a></li><li class="chapter-item "><a href="dev/roadmap.html"><strong aria-hidden="true">11.</strong> Roadmap</a></li><li class="chapter-item affix "><li class="part-title">Technical and Design</li><li class="chapter-item expanded "><a href="architecture.html" class="active"><strong aria-hidden="true">12.</strong> Architecture</a></li><li class="chapter-item "><a href="storage.html"><strong aria-hidden="true">13.</strong> Storage</a></li><li class="chapter-item "><a href="query.html"><strong aria-hidden="true">14.</strong> Query</a></li><li class="chapter-item "><a href="wal.html"><strong aria-hidden="true">15.</strong> Wal</a></li><li class="chapter-item "><a href="table_partitioning.html"><strong aria-hidden="true">16.</strong> Table Partitioning</a></li></ol>
+            </div>
+            <div id="sidebar-resize-handle" class="sidebar-resize-handle"></div>
+        </nav>
+
+        <div id="page-wrapper" class="page-wrapper">
+
+            <div class="page">
+                <div id="menu-bar-hover-placeholder"></div>
+                <div id="menu-bar" class="menu-bar sticky bordered">
+                    <div class="left-buttons">
+                        <button id="sidebar-toggle" class="icon-button" type="button" title="Toggle Table of Contents" aria-label="Toggle Table of Contents" aria-controls="sidebar">
+                            <i class="fa fa-bars"></i>
+                        </button>
+                        <button id="theme-toggle" class="icon-button" type="button" title="Change theme" aria-label="Change theme" aria-haspopup="true" aria-expanded="false" aria-controls="theme-list">
+                            <i class="fa fa-paint-brush"></i>
+                        </button>
+                        <ul id="theme-list" class="theme-popup" aria-label="Themes" role="menu">
+                            <li role="none"><button role="menuitem" class="theme" id="light">Light (default)</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="rust">Rust</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="coal">Coal</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="navy">Navy</button></li>
+                            <li role="none"><button role="menuitem" class="theme" id="ayu">Ayu</button></li>
+                        </ul>
+                        <button id="search-toggle" class="icon-button" type="button" title="Search. (Shortkey: s)" aria-label="Toggle Searchbar" aria-expanded="false" aria-keyshortcuts="S" aria-controls="searchbar">
+                            <i class="fa fa-search"></i>
+                        </button>
+                    </div>
+
+                    <h1 class="menu-title">CeresDB Documentation</h1>
+
+                    <div class="right-buttons">
+                        <a href="print.html" title="Print this book" aria-label="Print this book">
+                            <i id="print-button" class="fa fa-print"></i>
+                        </a>
+                    </div>
+                </div>
+
+                <div id="search-wrapper" class="hidden">
+                    <form id="searchbar-outer" class="searchbar-outer">
+                        <input type="search" id="searchbar" name="searchbar" placeholder="Search this book ..." aria-controls="searchresults-outer" aria-describedby="searchresults-header">
+                    </form>
+                    <div id="searchresults-outer" class="searchresults-outer hidden">
+                        <div id="searchresults-header" class="searchresults-header"></div>
+                        <ul id="searchresults">
+                        </ul>
+                    </div>
+                </div>
+                <!-- Apply ARIA attributes after the sidebar and the sidebar toggle button are added to the DOM -->
+                <script type="text/javascript">
+                    document.getElementById('sidebar-toggle').setAttribute('aria-expanded', sidebar === 'visible');
+                    document.getElementById('sidebar').setAttribute('aria-hidden', sidebar !== 'visible');
+                    Array.from(document.querySelectorAll('#sidebar a')).forEach(function(link) {
+                        link.setAttribute('tabIndex', sidebar === 'visible' ? 0 : -1);
+                    });
+                </script>
+
+                <div id="content" class="content">
+                    <main>
+                        <h1 id="introduction-to-ceresdbs-architecture"><a class="header" href="#introduction-to-ceresdbs-architecture">Introduction to CeresDB's Architecture</a></h1>
+<h2 id="target"><a class="header" href="#target">Target</a></h2>
+<ul>
+<li>Provide the overview of CeresDB to the developers who want to know more about CeresDB but have no idea where to start.</li>
+<li>Make a brief introduction to the important modules of CeresDB and the connections between these modules but details about their implementations are not be involved.</li>
+</ul>
+<h2 id="motivation"><a class="header" href="#motivation">Motivation</a></h2>
+<p>CeresDB is a timeseries database. However, CeresDB's goal is to handle both timeseries and analytic workloads compared with the traditional ones, which usually have a poor performance in handling analytic workloads.</p>
+<p>In the traditional timeseries database, the <code>Tag</code> columns (InfluxDB calls them <code>Tag</code> and Prometheus calls them <code>Label</code>) are normally indexed by generating an inverted index. However, it is found that the cardinality of <code>Tag</code> varies in different scenarios. And in some scenarios the cardinality of <code>Tag</code> is very high, and it takes a very high cost to store and retrieve the inverted index. On the other hand, it is observed that scanning+pruning often used by the analytical databases can do a good job to handle such these scenarios.</p>
+<p>The basic design idea of CeresDB is to adopt a hybrid storage format and the corresponding query method for a better performance in processing both timeseries and analytic workloads.</p>
+<h2 id="architecture"><a class="header" href="#architecture">Architecture</a></h2>
+<pre><code class="language-plaintext">┌──────────────────────────────────────────┐
+│       RPC Layer (HTTP/gRPC/MySQL)        │
+└──────────────────────────────────────────┘
+┌──────────────────────────────────────────┐
+│                 SQL Layer                │
+│ ┌─────────────────┐  ┌─────────────────┐ │
+│ │     Parser      │  │     Planner     │ │
+│ └─────────────────┘  └─────────────────┘ │
+└──────────────────────────────────────────┘
+┌───────────────────┐  ┌───────────────────┐
+│    Interpreter    │  │      Catalog      │
+└───────────────────┘  └───────────────────┘
+┌──────────────────────────────────────────┐
+│               Query Engine               │
+│ ┌─────────────────┐  ┌─────────────────┐ │
+│ │    Optimizer    │  │    Executor     │ │
+│ └─────────────────┘  └─────────────────┘ │
+└──────────────────────────────────────────┘
+┌──────────────────────────────────────────┐
+│         Pluggable Table Engine           │
+│  ┌────────────────────────────────────┐  │
+│  │              Analytic              │  │
+│  │┌────────────────┐┌────────────────┐│  │
+│  ││      Wal       ││    Memtable    ││  │
+│  │└────────────────┘└────────────────┘│  │
+│  │┌────────────────┐┌────────────────┐│  │
+│  ││     Flush      ││   Compaction   ││  │
+│  │└────────────────┘└────────────────┘│  │
+│  │┌────────────────┐┌────────────────┐│  │
+│  ││    Manifest    ││  Object Store  ││  │
+│  │└────────────────┘└────────────────┘│  │
+│  └────────────────────────────────────┘  │
+│  ┌ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │
+│           Another Table Engine        │  │
+│  └ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─   │
+└──────────────────────────────────────────┘
+</code></pre>
+<p>The figure above shows the architecture of CeresDB stand-alone service and the details of some important modules will be described in the following part.</p>
+<h3 id="rpc-layer"><a class="header" href="#rpc-layer">RPC Layer</a></h3>
+<p>module path: https://github.com/CeresDB/ceresdb/tree/main/server</p>
+<p>The current RPC supports multiple protocols including HTTP, gRPC, MySQL.</p>
+<p>Basically, HTTP and MySQL are used to debug CeresDB, query manually and perform DDL operations (such as creating, deleting tables, etc.). And gRPC protocol can be regarded as a customized protocol for high-performance, which is suitable for massive reading and writing operations.</p>
+<h3 id="sql-layer"><a class="header" href="#sql-layer">SQL Layer</a></h3>
+<p>module path: https://github.com/CeresDB/ceresdb/tree/main/sql</p>
+<p>SQL layer takes responsibilities for parsing sql and generating the plan.</p>
+<p>Based on <a href="https://github.com/sqlparser-rs/sqlparser-rs">sqlparser</a> a sql dialect, which introduces some key concepts including <code>Tag</code> and <code>Timestamp</code>, is provided for processing timeseries data. And by utilizing <a href="https://github.com/apache/arrow-datafusion">DataFusion</a> the planner can generate not only normal logical plans but also custom ones, such as plans for <code>PromQL</code>.</p>
+<h3 id="interpreter"><a class="header" href="#interpreter">Interpreter</a></h3>
+<p>module path: https://github.com/CeresDB/ceresdb/tree/main/interpreters</p>
+<p>The <code>Interpreter</code> module encapsulates the SQL <code>CRUD</code> operations. Actually, a sql received by CeresDB will be parsed, converted into the query plan and then executed in some specific interpreter, such as <code>SelectInterpreter</code>, <code>InsertInterpreter</code> and etc.</p>
+<h3 id="catalog"><a class="header" href="#catalog">Catalog</a></h3>
+<p>module path: https://github.com/CeresDB/ceresdb/tree/main/catalog_impls</p>
+<p><code>Catalog</code> is actually the module managing metadata and the levels of metadata adopted by CeresDB is similar to PostgreSQL: <code>Catalog &gt; Schema &gt; Table</code>, but they are only used as namespace.</p>
+<p>At present, <code>Catalog</code> and <code>Schema</code> have two different kinds of implementation for stand-alone and distributed mode because some strategies to generate ids and ways to persist metadata differ in different mode.</p>
+<h3 id="query-engine"><a class="header" href="#query-engine">Query Engine</a></h3>
+<p>module path: https://github.com/CeresDB/ceresdb/tree/main/query_engine</p>
+<p><code>Query Engine</code> is responsible for optimizing and executing query plan given a basic SQL plan provided by SQL layer and now such work is mainly delegated to <a href="https://github.com/apache/arrow-datafusion">DataFusion</a>.</p>
+<p>In addition to the basic functions of SQL, CeresDB also defines some customized query protocols and optimization rules for some specific query plans by utilizing the extensibility provided by <a href="https://github.com/apache/arrow-datafusion">DataFusion</a>. For example, the implementation of <code>PromQL</code> is implemented in this way and read it if you are interested.</p>
+<h3 id="pluggable-table-engine"><a class="header" href="#pluggable-table-engine">Pluggable Table Engine</a></h3>
+<p>module path: https://github.com/CeresDB/ceresdb/tree/main/table_engine</p>
+<p><code>Table Engine</code> is actually a storage engine for managing tables in CeresDB and the pluggability of <code>Table Engine</code> is a core design of CeresDB which matters in achieving our target (process both timeseries and analytic workloads well). CeresDB will have multiple kinds of <code>Table Engine</code> for different workloads and the most appropriate one should be chosen as the storage engine according to the workload pattern.</p>
+<p>Now the requirements for a <code>Table Engine</code> are:</p>
+<ul>
+<li>Manage all the shared resources under the engine:
+<ul>
+<li>Memory</li>
+<li>Storage</li>
+<li>CPU</li>
+</ul>
+</li>
+<li>Manage metadata of tables such as table schema and table options;</li>
+<li>Provide <code>Table</code> instances which provides <code>read</code> and <code>write</code> methods;</li>
+<li>Take responsibilities for creating, opening, dropping and closing <code>Table</code> instance;</li>
+<li>....</li>
+</ul>
+<p>Actually the things that a <code>Table Engine</code> needs to process are a little complicated. And now in CeresDB only one <code>Table Engine</code> called <code>Analytic</code> is provided and does a good job in processing analytical workload, but it is not ready yet to handle the timeseries workload (we plan to enhance it for a better performance by adding some indexes which help handle timeseries workload).</p>
+<p>The following part gives a description about details of <code>Analytic Table Engine</code>.</p>
+<h4 id="wal"><a class="header" href="#wal">WAL</a></h4>
+<p>module path: https://github.com/CeresDB/ceresdb/tree/main/wal</p>
+<p>The model of CeresDB processing data is <code>WAL</code> + <code>MemTable</code> that the recent written data is written to <code>WAL</code> first and then to <code>MemTable</code> and after a certain amount of data in <code>MemTable</code> is accumulated, the data will be organized in a query-friendly form to persistent devices.</p>
+<p>Now two implementations of <code>WAL</code> are provided for stand-alone and distributed mode:</p>
+<ul>
+<li>For stand-alone mode, <code>WAL</code> is based on <code>RocksDB</code> and data is persisted on the local disk.</li>
+<li>For distributed mode, <code>WAL</code> is required as a distributed component and to be responsible for reliability of the newly written data, so now we provide an implementation based on <a href="https://github.com/oceanbase/oceanbase">OceanBase</a> and in our roadmap a more lightweight implementation will be provided.</li>
+</ul>
+<p>Besides, <code>WAL</code>'s trait definition tells that <code>WAL</code> has the concept of <code>Region</code> and actually each table is assigned to a <code>Region</code> so that the isolation between tables is gained and such an isolation provides convenience for some operations on table's level (such as different <code>TTL</code>s for different tables).</p>
+<h4 id="memtable"><a class="header" href="#memtable">MemTable</a></h4>
+<p>module path: https://github.com/CeresDB/ceresdb/tree/main/analytic_engine/src/memtable</p>
+<p><code>Memtable</code> is used to store the newly written data and after a certain amount of data is accumulated, CeresDB organizes the data in <code>MemTable</code> into a query-friendly storage format (<code>SST</code>) and stores it to the persistent device. <code>MemTable</code> is readable before it gets persisted (flushed).</p>
+<p>The current implementation of <code>MemTable</code> is based on <a href="https://github.com/tikv/agatedb/blob/8510bff2bfde5b766c3f83cf81c00141967d48a4/skiplist">agatedb's skiplist</a>. It allows concurrent reads and writes and can control memory usage based on <a href="https://github.com/CeresDB/ceresdb/tree/main/components/skiplist">Arena</a>.</p>
+<h4 id="flush"><a class="header" href="#flush">Flush</a></h4>
+<p>module path: https://github.com/CeresDB/ceresdb/blob/main/analytic_engine/src/instance/flush_compaction.rs</p>
+<p>What <code>Flush</code> does is that when the memory usage of <code>MemTable</code> reaches the threshold, some <code>MemTables</code> are selected for flushing into query-friendly <code>SST</code>s saved on persistent device.</p>
+<p>During the flushing procedure, the data will be divided by a certain time range (which is configured by table option <code>Segment Duration</code>), and no <code>SST</code> will span the <code>Segment Duration</code>. Actually this is also a common operation in most timeseries databases which organizes data in the time dimension to speed up subsequent time-related operations, such as querying data over a time range and assisting purge data outside the <code>TTL</code>.</p>
+<p>At present, the control process of <code>Flush</code> is a little complicated, so the details will be explained in another document.</p>
+<h4 id="compaction"><a class="header" href="#compaction">Compaction</a></h4>
+<p>module path: https://github.com/CeresDB/ceresdb/tree/main/analytic_engine/src/compaction</p>
+<p>The data of <code>MemTable</code> is flushed as <code>SST</code>s, but the file size of recently flushed <code>SST</code> may be very small. And too small or too many <code>SST</code>s lead to the poor query performance. Therefore, <code>Compaction</code> is then introduced to rearrange the <code>SST</code>s so that the multiple smaller <code>SST</code> files can be compacted into a larger <code>SST</code> file.</p>
+<p>The detailed strategy of <code>Compaction</code> will also be described with <code>Flush</code> in subsequent documents.</p>
+<h4 id="manifest"><a class="header" href="#manifest">Manifest</a></h4>
+<p>module path: https://github.com/CeresDB/ceresdb/tree/main/analytic_engine/src/meta</p>
+<p><code>Manifest</code> takes responsibilities for managing tables' metadata of <code>Analytic Engine</code> including:</p>
+<ul>
+<li>Table schema and table options;</li>
+<li>The sequence number where the newest flush finishes;</li>
+<li>The information of <code>SST</code>, such as <code>SST</code> path.</li>
+</ul>
+<p>Now the <code>Manifest</code> is based on <code>WAL</code> (this is a different instance from the <code>WAL</code> mentioned above for newly written data) and in order to avoid infinite expansion of metadata (actually every <code>Flush</code> leads to an update on sst information), <code>Snapshot</code> is also introduced to clean up the history of metadata updates.</p>
+<h4 id="object-store"><a class="header" href="#object-store">Object Store</a></h4>
+<p>module path: https://github.com/CeresDB/ceresdb/tree/main/components/object_store</p>
+<p>The <code>SST</code> generated by <code>Flush</code> needs to be persisted and the abstraction of the persistent storage device is <code>ObjectStore</code> including multiple implementations:</p>
+<ul>
+<li>Based on local file system;</li>
+<li>Based on <a href="https://www.alibabacloud.com/product/object-storage-service">Alibaba Cloud OSS</a>.</li>
+</ul>
+<p>The distributed architecture of CeresDB separates storage and computing, which requires <code>Object Store</code> needs to be a highly available and reliable service independent of CeresDB. Therefore, storage systems like <a href="https://aws.amazon.com/s3/">Amazon S3</a>, <a href="https://www.alibabacloud.com/product/object-storage-service">Alibaba Cloud OSS</a> is a good choice and in the future implementations on storage systems of some other cloud service providers is planned to provide.</p>
+<h4 id="sst"><a class="header" href="#sst">SST</a></h4>
+<p>module path: https://github.com/CeresDB/ceresdb/tree/main/analytic_engine/src/sst</p>
+<p>Both <code>Flush</code> and <code>Compaction</code> involves <code>SST</code> and in the codebase <code>SST</code> itself is actually an abstraction that can have multiple specific implementations. The current implementation is based on <a href="https://parquet.apache.org/">Parquet</a>, which is a column-oriented data file format designed for efficient data storage and retrieval.</p>
+<p>The format of <code>SST</code> is very critical for retrieving data and is also the most important part to perform well in handling both timeseries and analytic workloads. At present, our <a href="https://parquet.apache.org/">Parquet</a>-based implementation is good at processing analytic workload but is poor at processing timeseries workload. In our roadmap, we will explore more storage formats in order to achieve a good performance in both workloads.</p>
+<h4 id="space"><a class="header" href="#space">Space</a></h4>
+<p>module path: https://github.com/CeresDB/ceresdb/blob/main/analytic_engine/src/space.rs</p>
+<p>In <code>Analytic Engine</code>, there is a concept called <code>space</code> and here is an explanation for it to resolve some ambiguities when read source code. Actually <code>Analytic Engine</code> does not have the concept of <code>catalog</code> and <code>schema</code> and only provides two levels of relationship: <code>space</code> and <code>table</code>. And in the implementation, the <code>schema id</code> (which should be unique across all <code>catalog</code>s) on the upper layer is actually mapped to <code>space id</code>.</p>
+<p>The <code>space</code> in <code>Analytic Engine</code> serves mainly for isolation of resources for different tenants, such as the usage of memory.</p>
+<h2 id="critical-path"><a class="header" href="#critical-path">Critical Path</a></h2>
+<p>After a brief introduction to some important modules of CeresDB, we will give a description for some critical paths in code, hoping to provide interested developers with a guide for reading the code.</p>
+<h3 id="query"><a class="header" href="#query">Query</a></h3>
+<pre><code class="language-plaintext">┌───────┐      ┌───────┐      ┌───────┐
+│       │──1──▶│       │──2──▶│       │
+│Server │      │  SQL  │      │Catalog│
+│       │◀─10──│       │◀─3───│       │
+└───────┘      └───────┘      └───────┘
+                │    ▲
+               4│   9│
+                │    │
+                ▼    │
+┌─────────────────────────────────────┐
+│                                     │
+│             Interpreter             │
+│                                     │
+└─────────────────────────────────────┘
+                           │    ▲
+                          5│   8│
+                           │    │
+                           ▼    │
+                   ┌──────────────────┐
+                   │                  │
+                   │   Query Engine   │
+                   │                  │
+                   └──────────────────┘
+                           │    ▲
+                          6│   7│
+                           │    │
+                           ▼    │
+ ┌─────────────────────────────────────┐
+ │                                     │
+ │            Table Engine             │
+ │                                     │
+ └─────────────────────────────────────┘
+</code></pre>
+<p>Take <code>SELECT</code> SQL as an example. The figure above shows the query procedure and the numbers in it indicates the order of calling between the modules.</p>
+<p>Here are the details:</p>
+<ul>
+<li>Server module chooses a proper rpc module (it may be HTTP, gRPC or mysql) to process the requests according the protocol used by the requests;</li>
+<li>Parse SQL in the request by the parser;</li>
+<li>With the parsed sql and the catalog/schema module, <a href="https://github.com/apache/arrow-datafusion">DataFusion</a> can generate the logical plan;</li>
+<li>With the logical plan, the corresponding <code>Interpreter</code> is created and logical plan will be executed by it;</li>
+<li>For the logical plan of normal <code>Select</code> SQL, it will be executed through <code>SelectInterpreter</code>;</li>
+<li>In the <code>SelectInterpreter</code> the specific query logic is executed by the <code>Query Engine</code>:
+<ul>
+<li>Optimize the logical plan;</li>
+<li>Generate the physical plan;</li>
+<li>Optimize the physical plan;</li>
+<li>Execute the physical plan;</li>
+</ul>
+</li>
+<li>The execution of physical plan involves <code>Analytic Engine</code>:
+<ul>
+<li>Data is obtained by <code>read</code> method of <code>Table</code> instance provided by <code>Analytic Engine</code>;</li>
+<li>The source of the table data is <code>SST</code> and <code>Memtable</code>, and the data can be filtered by the pushed down predicates;</li>
+<li>After retrieving the table data, <code>Query Engine</code> will complete the specific computation and generate the final results;</li>
+</ul>
+</li>
+<li><code>SelectInterpreter</code> gets the results and feeds them to the protocol module;</li>
+<li>After the protocol layer converts the results, the server module responds to the client with them.</li>
+</ul>
+<h3 id="write"><a class="header" href="#write">Write</a></h3>
+<pre><code class="language-plaintext">┌───────┐      ┌───────┐      ┌───────┐
+│       │──1──▶│       │──2──▶│       │
+│Server │      │  SQL  │      │Catalog│
+│       │◀─8───│       │◀─3───│       │
+└───────┘      └───────┘      └───────┘
+                │    ▲
+               4│   7│
+                │    │
+                ▼    │
+┌─────────────────────────────────────┐
+│                                     │
+│             Interpreter             │
+│                                     │
+└─────────────────────────────────────┘
+      │    ▲
+      │    │
+      │    │
+      │    │
+      │    │       ┌──────────────────┐
+      │    │       │                  │
+     5│   6│       │   Query Engine   │
+      │    │       │                  │
+      │    │       └──────────────────┘
+      │    │
+      │    │
+      │    │
+      ▼    │
+ ┌─────────────────────────────────────┐
+ │                                     │
+ │            Table Engine             │
+ │                                     │
+ └─────────────────────────────────────┘
+</code></pre>
+<p>Take <code>INSERT</code> SQL as an example. The figure above shows the query procedure and the numbers in it indicates the order of calling between the modules.</p>
+<p>Here are the details:</p>
+<ul>
+<li>Server module chooses a proper rpc module (it may be HTTP, gRPC or mysql) to process the requests according the protocol used by the requests;</li>
+<li>Parse SQL in the request by the parser;</li>
+<li>With the parsed sql and the catalog/schema module, <a href="https://github.com/apache/arrow-datafusion">DataFusion</a> can generate the logical plan;</li>
+<li>With the logical plan, the corresponding <code>Interpreter</code> is created and logical plan will be executed by it;</li>
+<li>For the logical plan of normal <code>INSERT</code> SQL, it will be executed through <code>InsertInterpreter</code>;</li>
+<li>In the <code>InsertInterpreter</code>, <code>write</code> method of <code>Table</code> provided <code>Analytic Engine</code> is called:
+<ul>
+<li>Write the data into <code>WAL</code> first;</li>
+<li>Write the data into <code>MemTable</code> then;</li>
+</ul>
+</li>
+<li>Before writing to <code>MemTable</code>, the memory usage will be checked. If the memory usage is too high, the flush process will be triggered:
+<ul>
+<li>Persist some old MemTables as <code>SST</code>s;</li>
+<li>Delete the corresponding <code>WAL</code> entries;</li>
+<li>Updates the manifest for the new <code>SST</code>s and the sequence number of <code>WAL</code>;</li>
+</ul>
+</li>
+<li>Server module responds to the client with the execution result.</li>
+</ul>
+
+                    </main>
+
+                    <nav class="nav-wrapper" aria-label="Page navigation">
+                        <!-- Mobile navigation buttons -->
+                            <a rel="prev" href="dev/roadmap.html" class="mobile-nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                                <i class="fa fa-angle-left"></i>
+                            </a>
+                            <a rel="next" href="storage.html" class="mobile-nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                                <i class="fa fa-angle-right"></i>
+                            </a>
+                        <div style="clear: both"></div>
+                    </nav>
+                </div>
+            </div>
+
+            <nav class="nav-wide-wrapper" aria-label="Page navigation">
+                    <a rel="prev" href="dev/roadmap.html" class="nav-chapters previous" title="Previous chapter" aria-label="Previous chapter" aria-keyshortcuts="Left">
+                        <i class="fa fa-angle-left"></i>
+                    </a>
+                    <a rel="next" href="storage.html" class="nav-chapters next" title="Next chapter" aria-label="Next chapter" aria-keyshortcuts="Right">
+                        <i class="fa fa-angle-right"></i>
+                    </a>
+            </nav>
+
+        </div>
+
+        <script type="text/javascript">
+            window.playground_copyable = true;
+        </script>
+        <script src="elasticlunr.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="mark.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="searcher.js" type="text/javascript" charset="utf-8"></script>
+        <script src="clipboard.min.js" type="text/javascript" charset="utf-8"></script>
+        <script src="highlight.js" type="text/javascript" charset="utf-8"></script>
+        <script src="book.js" type="text/javascript" charset="utf-8"></script>
+
+        <!-- Custom JS scripts -->
+    </body>
+</html>
