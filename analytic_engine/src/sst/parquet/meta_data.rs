@@ -86,11 +86,14 @@ impl TryFrom<sst_pb::SstBloomFilter> for BloomFilter {
                     .column_filters
                     .into_iter()
                     .map(|encoded_bytes| {
-                        Xor8::from_bytes(encoded_bytes).context(InvalidBloomFilter)
+                        if let Ok(x) = Xor8::from_bytes(encoded_bytes) {
+                            return x;
+                        }
+                        Xor8::default()
                     })
-                    .collect::<Result<Vec<_>>>()
+                    .collect::<Vec<_>>()
             })
-            .collect::<Result<Vec<_>>>()?;
+            .collect::<Vec<_>>();
 
         Ok(BloomFilter { filters })
     }

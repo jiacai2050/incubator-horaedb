@@ -42,10 +42,6 @@ struct Args {
     /// Row group size of new sst file
     #[clap(short, long, default_value_t = 8192)]
     batch_size: usize,
-
-    /// Storage format(values: columnar/hybrid)
-    #[clap(short, long, default_value = "columnar")]
-    output_format: String,
 }
 
 fn new_runtime(thread_num: usize) -> Runtime {
@@ -96,8 +92,9 @@ async fn run(args: Args, runtime: Arc<Runtime>) -> Result<()> {
         .await
         .expect("no sst reader found");
 
-    let output_format_hint = StorageFormatHint::try_from(args.output_format.as_str())
-        .with_context(|| format!("invalid storage format:{}", args.output_format))?;
+    let format = "columnar";
+    let output_format_hint = StorageFormatHint::try_from(format)
+        .with_context(|| format!("invalid storage format:{}", format))?;
     let builder_opts = SstWriteOptions {
         storage_format_hint: output_format_hint,
         num_rows_per_row_group: args.batch_size,
