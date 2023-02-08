@@ -10,11 +10,11 @@ use std::sync::{
 use async_trait::async_trait;
 use common_types::{record_batch::RecordBatchWithKey, request_id::RequestId};
 use datafusion::parquet::basic::Compression;
-use ethbloom::{Bloom, Input};
 use futures::StreamExt;
 use log::debug;
 use object_store::{ObjectStoreRef, Path};
 use snafu::ResultExt;
+use xorfilter::Xor8Builder;
 
 use crate::{
     sst::{
@@ -159,19 +159,22 @@ impl RecordBytesReader {
             .iter()
             .map(|row_group_batch| {
                 let mut row_group_filters =
-                    vec![Bloom::default(); row_group_batch[0].num_columns()];
+                    vec![Xor8Builder::new(); row_group_batch[0].num_columns()];
 
                 for partial_batch in row_group_batch {
                     for (col_idx, column) in partial_batch.columns().iter().enumerate() {
                         for row in 0..column.num_rows() {
                             let datum = column.datum(row);
                             let bytes = datum.to_bytes();
-                            row_group_filters[col_idx].accrue(Input::Raw(&bytes));
+                            row_group_filters[col_idx].insert(&bytes);
                         }
                     }
                 }
 
                 row_group_filters
+                    .into_iter()
+                    .map(|mut b| b.build().unwrap())
+                    .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
 

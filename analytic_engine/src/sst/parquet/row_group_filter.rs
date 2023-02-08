@@ -7,7 +7,6 @@ use std::cmp::Ordering;
 use arrow::datatypes::SchemaRef;
 use common_types::datum::Datum;
 use datafusion::{prelude::Expr, scalar::ScalarValue};
-use ethbloom::{Bloom, Input};
 use log::debug;
 use parquet::file::metadata::RowGroupMetaData;
 use parquet_ext::prune::{
@@ -15,6 +14,7 @@ use parquet_ext::prune::{
     min_max,
 };
 use snafu::ensure;
+use xorfilter::Xor8;
 
 use crate::sst::reader::error::{OtherNoCause, Result};
 
@@ -25,7 +25,7 @@ use crate::sst::reader::error::{OtherNoCause, Result};
 pub struct RowGroupFilter<'a> {
     schema: &'a SchemaRef,
     row_groups: &'a [RowGroupMetaData],
-    blooms: Option<&'a [Vec<Bloom>]>,
+    blooms: Option<&'a [Vec<Xor8>]>,
     predicates: &'a [Expr],
 }
 
@@ -33,7 +33,7 @@ impl<'a> RowGroupFilter<'a> {
     pub fn try_new(
         schema: &'a SchemaRef,
         row_groups: &'a [RowGroupMetaData],
-        blooms: Option<&'a [Vec<Bloom>]>,
+        blooms: Option<&'a [Vec<Xor8>]>,
         predicates: &'a [Expr],
     ) -> Result<Self> {
         if let Some(blooms) = blooms {
@@ -92,12 +92,13 @@ impl<'a> RowGroupFilter<'a> {
     }
 
     /// Filter row groups according to the bloom filter.
-    fn filter_by_bloom(&self, blooms: &[Vec<Bloom>]) -> Vec<usize> {
+    fn filter_by_bloom(&self, blooms: &[Vec<Xor8>]) -> Vec<usize> {
         let is_equal =
             |col_pos: ColumnPosition, val: &ScalarValue, negated: bool| -> Option<bool> {
                 let datum = Datum::from_scalar_value(val)?;
                 let col_bloom = blooms.get(col_pos.row_group_idx)?.get(col_pos.column_idx)?;
-                let exist = col_bloom.contains_input(Input::Raw(&datum.to_bytes()));
+                let exist = col_bloom.contains(&datum.to_bytes());
+
                 if exist {
                     // bloom filter has false positivity, that is to say we are unsure whether this
                     // value exists even if the bloom filter says it exists.

@@ -7,9 +7,9 @@ use std::{fmt, sync::Arc};
 use bytes::Bytes;
 use common_types::{schema::Schema, time::TimeRange, SequenceNumber};
 use common_util::define_result;
-use ethbloom::Bloom;
 use proto::{common as common_pb, sst as sst_pb};
 use snafu::{Backtrace, OptionExt, ResultExt, Snafu};
+use xorfilter::Xor8;
 
 use crate::sst::writer::MetaData;
 
@@ -22,12 +22,11 @@ pub enum Error {
     #[snafu(display("Table schema is not found.\nBacktrace\n:{}", backtrace))]
     TableSchemaNotFound { backtrace: Backtrace },
 
-    #[snafu(display(
-        "Bloom filter should be 256 byte, current:{}.\nBacktrace\n:{}",
-        size,
-        backtrace
-    ))]
-    InvalidBloomFilterSize { size: usize, backtrace: Backtrace },
+    #[snafu(display("Bloom filter invalid, err:{}.\nBacktrace\n:{}", source, backtrace))]
+    InvalidBloomFilter {
+        source: std::io::Error,
+        backtrace: Backtrace,
+    },
 
     #[snafu(display("Failed to convert time range, err:{}", source))]
     ConvertTimeRange { source: common_types::time::Error },
@@ -38,21 +37,21 @@ pub enum Error {
 
 define_result!(Error);
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Clone, PartialEq, Default)]
 pub struct BloomFilter {
     // Two level vector means
     // 1. row group
     // 2. column
-    filters: Vec<Vec<Bloom>>,
+    filters: Vec<Vec<Xor8>>,
 }
 
 impl BloomFilter {
-    pub fn new(filters: Vec<Vec<Bloom>>) -> Self {
+    pub fn new(filters: Vec<Vec<Xor8>>) -> Self {
         Self { filters }
     }
 
     #[inline]
-    pub fn filters(&self) -> &[Vec<Bloom>] {
+    pub fn filters(&self) -> &[Vec<Xor8>] {
         &self.filters
     }
 }
@@ -65,7 +64,7 @@ impl From<BloomFilter> for sst_pb::SstBloomFilter {
             .map(|row_group_filter| {
                 let column_filters = row_group_filter
                     .iter()
-                    .map(|column_filter| column_filter.data().to_vec())
+                    .map(|column_filter| column_filter.to_bytes())
                     .collect::<Vec<_>>();
                 sst_pb::sst_bloom_filter::RowGroupFilter { column_filters }
             })
@@ -87,13 +86,7 @@ impl TryFrom<sst_pb::SstBloomFilter> for BloomFilter {
                     .column_filters
                     .into_iter()
                     .map(|encoded_bytes| {
-                        let size = encoded_bytes.len();
-                        let bs: [u8; 256] = encoded_bytes
-                            .try_into()
-                            .ok()
-                            .context(InvalidBloomFilterSize { size })?;
-
-                        Ok(Bloom::from(bs))
+                        Xor8::from_bytes(encoded_bytes).context(InvalidBloomFilter)
                     })
                     .collect::<Result<Vec<_>>>()
             })
