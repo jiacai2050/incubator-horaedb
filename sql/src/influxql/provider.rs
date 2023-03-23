@@ -167,34 +167,27 @@ fn map_column_to_influx_tag_column(column: &ColumnSchema) -> Result<InfluxColumn
 
 // TODO: support more field types.
 fn map_column_to_influx_field_column(column: &ColumnSchema) -> Result<InfluxColumnType> {
-    if column.is_nullable {
-        match column.data_type {
-            DatumKind::Int64 => Ok(InfluxColumnType::Field(InfluxFieldType::Integer)),
-            DatumKind::UInt64 => Ok(InfluxColumnType::Field(InfluxFieldType::UInteger)),
-            DatumKind::Double => Ok(InfluxColumnType::Field(InfluxFieldType::Float)),
-            DatumKind::String => Ok(InfluxColumnType::Field(InfluxFieldType::String)),
-            DatumKind::Boolean => Ok(InfluxColumnType::Field(InfluxFieldType::Boolean)),
-            DatumKind::Null
-            | DatumKind::Timestamp
-            | DatumKind::Float
-            | DatumKind::Varbinary
-            | DatumKind::UInt32
-            | DatumKind::UInt16
-            | DatumKind::UInt8
-            | DatumKind::Int32
-            | DatumKind::Int16
-            | DatumKind::Int8
-            | DatumKind::Date
-            | DatumKind::Time => BuildSchema {
-                msg: format!("invalid field column, column:{column:?}"),
-            }
-            .fail(),
-        }
-    } else {
-        BuildSchema {
+    match column.data_type {
+        DatumKind::Int64 => Ok(InfluxColumnType::Field(InfluxFieldType::Integer)),
+        DatumKind::UInt64 => Ok(InfluxColumnType::Field(InfluxFieldType::UInteger)),
+        DatumKind::Double => Ok(InfluxColumnType::Field(InfluxFieldType::Float)),
+        DatumKind::String => Ok(InfluxColumnType::Field(InfluxFieldType::String)),
+        DatumKind::Boolean => Ok(InfluxColumnType::Field(InfluxFieldType::Boolean)),
+        DatumKind::Null
+        | DatumKind::Timestamp
+        | DatumKind::Float
+        | DatumKind::Varbinary
+        | DatumKind::UInt32
+        | DatumKind::UInt16
+        | DatumKind::UInt8
+        | DatumKind::Int32
+        | DatumKind::Int16
+        | DatumKind::Int8
+        | DatumKind::Date
+        | DatumKind::Time => BuildSchema {
             msg: format!("invalid field column, column:{column:?}"),
         }
-        .fail()
+        .fail(),
     }
 }
 

@@ -54,10 +54,7 @@ impl<'a, P: MetaProvider> Planner<'a, P> {
         let influx_schema_provider = InfluxSchemaProviderImpl {
             context_provider: &self.context_provider,
         };
-        let influxql_logical_planner = InfluxQLToLogicalPlan::new(
-            &influx_schema_provider,
-            CERESDB_MEASUREMENT_COLUMN_NAME.to_string(),
-        );
+        let influxql_logical_planner = InfluxQLToLogicalPlan::new(&influx_schema_provider);
 
         let df_plan = influxql_logical_planner
             .statement_to_plan(stmt)
