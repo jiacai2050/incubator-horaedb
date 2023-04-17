@@ -19,7 +19,7 @@ pub mod write_worker;
 
 use std::{
     collections::HashMap,
-    sync::{Arc, RwLock},
+    sync::{atomic::AtomicU64, Arc, RwLock},
 };
 
 use common_types::table::TableId;
@@ -177,6 +177,7 @@ pub struct Instance {
     /// Options for scanning sst
     pub(crate) scan_options: ScanOptions,
     pub(crate) iter_options: Option<IterOptions>,
+    last_sequence: AtomicU64,
 }
 
 impl Instance {

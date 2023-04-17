@@ -2,7 +2,7 @@
 
 //! Write logic of instance
 
-use std::sync::Arc;
+use std::sync::{atomic::Ordering, Arc};
 
 use ceresdbproto::{schema as schema_pb, table_requests};
 use common_types::{
@@ -369,9 +369,13 @@ impl Instance {
         index_in_writer: IndexInWriterSchema,
         encoded_rows: Vec<ByteVec>,
     ) -> Result<()> {
-        let sequence = self
-            .write_to_wal(worker_local, table_data, encoded_rows)
-            .await?;
+        let sequence = if std::env::var("ENABLE_WAL").unwrap_or("true".to_string()) == "true" {
+            self.write_to_wal(worker_local, table_data, encoded_rows)
+                .await?
+        } else {
+            self.last_sequence
+                .fetch_add(encoded_rows.len() as u64, Ordering::Relaxed)
+        };
 
         Self::write_to_memtable(
             worker_local,

@@ -111,6 +111,7 @@ impl Instance {
                 .map(|v| v.as_byte() as usize),
             iter_options,
             scan_options,
+            last_sequence: Default::default(),
         });
 
         Ok(instance)
