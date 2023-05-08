@@ -19,13 +19,13 @@ VALUES
     (1656777600000, 6);
 
 -- Test all time granularity.
-SELECT time_bucket(`timestamp`, 'P1Y') FROM `02_function_time_bucket_table`;
-SELECT time_bucket(`timestamp`, 'P1M') FROM `02_function_time_bucket_table`;
-SELECT time_bucket(`timestamp`, 'P1W') FROM `02_function_time_bucket_table`;
-SELECT time_bucket(`timestamp`, 'P1D') FROM `02_function_time_bucket_table`;
-SELECT time_bucket(`timestamp`, 'PT1H') FROM `02_function_time_bucket_table`;
-SELECT time_bucket(`timestamp`, 'PT1M') FROM `02_function_time_bucket_table`;
-SELECT time_bucket(`timestamp`, 'PT1S') FROM `02_function_time_bucket_table`;
+SELECT timestamp, time_bucket(`timestamp`, 'P1Y') FROM `02_function_time_bucket_table` order by timestamp;
+SELECT timestamp, time_bucket(`timestamp`, 'P1M') FROM `02_function_time_bucket_table` order by timestamp;
+SELECT timestamp, time_bucket(`timestamp`, 'P1W') FROM `02_function_time_bucket_table` order by timestamp;
+SELECT timestamp, time_bucket(`timestamp`, 'P1D') FROM `02_function_time_bucket_table` order by timestamp;
+SELECT timestamp, time_bucket(`timestamp`, 'PT1H') FROM `02_function_time_bucket_table` order by timestamp;
+SELECT timestamp, time_bucket(`timestamp`, 'PT1M') FROM `02_function_time_bucket_table` order by timestamp;
+SELECT timestamp, time_bucket(`timestamp`, 'PT1S') FROM `02_function_time_bucket_table` order by timestamp;
 
 -- Test various parameters.
 -- NOTICE: customizing format is not supported now.
