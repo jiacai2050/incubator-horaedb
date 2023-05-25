@@ -565,7 +565,11 @@ impl ScheduleWorker {
         let table_options = table_data.table_options();
         let compaction_strategy = table_options.compaction_strategy;
         let picker = self.picker_manager.get_picker(compaction_strategy);
-        let picker_ctx = match new_picker_context(&table_options) {
+        let picker_ctx = match new_picker_context(
+            &table_options,
+            compact_req.table_data.id,
+            compact_req.table_data.name.clone(),
+        ) {
             Some(v) => v,
             None => {
                 warn!("No valid context can be created, compaction request will be ignored, table_id:{}, table_name:{}",
@@ -662,10 +666,16 @@ impl ScheduleWorker {
 
 // If segment duration is None, then no compaction should be triggered, but we
 // return a None context instead of panic here.
-fn new_picker_context(table_opts: &TableOptions) -> Option<PickerContext> {
+fn new_picker_context(
+    table_opts: &TableOptions,
+    table_id: TableId,
+    table_name: String,
+) -> Option<PickerContext> {
     table_opts
         .segment_duration()
         .map(|segment_duration| PickerContext {
+            table_id,
+            table_name,
             segment_duration,
             ttl: table_opts.ttl().map(|ttl| ttl.0),
             strategy: table_opts.compaction_strategy,

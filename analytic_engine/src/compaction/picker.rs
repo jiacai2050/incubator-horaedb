@@ -12,6 +12,7 @@ use common_types::time::Timestamp;
 use common_util::{config::TimeUnit, define_result};
 use log::{debug, info};
 use snafu::Snafu;
+use table_engine::table::TableId;
 
 use crate::{
     compaction::{
@@ -31,6 +32,8 @@ define_result!(Error);
 
 #[derive(Clone)]
 pub struct PickerContext {
+    pub table_id: TableId,
+    pub table_name: String,
     pub segment_duration: Duration,
     /// The ttl of the data in sst.
     pub ttl: Option<Duration>,
@@ -130,6 +133,11 @@ impl CompactionPicker for CommonCompactionPicker {
             expired: levels_controller.expired_ssts(expire_time),
             ..Default::default()
         };
+
+        debug!(
+            "Pick compaction, table:{}#{}, expired:{:?}",
+            ctx.table_name, ctx.table_id, compaction_task.expired
+        );
 
         if let Some(input_files) =
             self.pick_compact_candidates(&ctx, levels_controller, expire_time)

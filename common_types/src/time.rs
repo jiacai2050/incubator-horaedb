@@ -259,10 +259,14 @@ impl TimeRange {
         !self.not_intersecting(other)
     }
 
-    /// Return true if the time range is expired (`exclusive_end_time` <
+    /// Return true if the time range is expired (`exclusive_end_time` <=
     /// `expire_time`).
     pub fn is_expired(&self, expire_time: Option<Timestamp>) -> bool {
-        expire_time.is_some() && self.exclusive_end() <= expire_time.unwrap()
+        if let Some(expire) = expire_time {
+            return self.exclusive_end <= expire;
+        }
+
+        false
     }
 
     #[inline]
