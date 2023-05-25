@@ -134,10 +134,23 @@ impl CompactionPicker for CommonCompactionPicker {
             ..Default::default()
         };
 
-        debug!(
-            "Pick compaction, table:{}#{}, expired:{:?}",
-            ctx.table_name, ctx.table_id, compaction_task.expired
-        );
+        if ctx.table_id.as_u64() == 22 || ctx.table_id.as_u64() == 64 {
+            info!(
+                "Pick compaction, table:{}#{}, level0_files:{:?}, level1:{:?}",
+                ctx.table_name,
+                ctx.table_id,
+                levels_controller
+                    .iter_ssts_at_level(0.into())
+                    .collect::<Vec<_>>(),
+                levels_controller
+                    .iter_ssts_at_level(1.into())
+                    .collect::<Vec<_>>(),
+            );
+            info!(
+                "Pick compaction, table:{}#{}, expired:{:?}",
+                ctx.table_name, ctx.table_id, compaction_task.expired
+            );
+        }
 
         if let Some(input_files) =
             self.pick_compact_candidates(&ctx, levels_controller, expire_time)
