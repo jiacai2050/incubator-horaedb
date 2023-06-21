@@ -851,107 +851,113 @@ impl<'a, P: MetaProvider> PlannerDelegate<'a, P> {
 
     // REQUIRE: SqlStatement must be INSERT stmt
     fn insert_to_plan(&self, sql_stmt: SqlStatement) -> Result<Plan> {
-        match sql_stmt {
-            SqlStatement::Insert {
-                table_name,
-                columns,
-                source,
-                ..
-            } => {
-                let table_name = TableName::from(table_name).to_string();
-
-                let table = self
-                    .find_table(&table_name)?
-                    .context(TableNotFound { name: table_name })?;
-
-                let schema = table.schema();
-                // Column name and its index in insert stmt: {column name} => index
-                let column_names_idx: HashMap<_, _> = columns
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, ident)| (&ident.value, idx))
-                    .collect();
-                ensure!(
-                    column_names_idx.len() == columns.len(),
-                    InsertDuplicateColumns
-                );
-
-                validate_insert_stmt(table.name(), &schema, &column_names_idx)?;
-
-                let df_fields = schema
-                    .columns()
-                    .iter()
-                    .map(|column_schema| {
-                        DFField::new_unqualified(
-                            &column_schema.name,
-                            column_schema.data_type.to_arrow_data_type(),
-                            column_schema.is_nullable,
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let df_schema = DFSchema::new_with_metadata(df_fields, HashMap::new())
-                    .context(CreateDatafusionSchema)?;
-                let df_planner =
-                    SqlToRel::new_with_options(&self.meta_provider, DEFAULT_PARSER_OPTS);
-
-                // Index in insert values stmt of each column in table schema
-                let mut column_index_in_insert = Vec::with_capacity(schema.num_columns());
-                // Column index in schema to its default-value-expr
-                let mut default_value_map = BTreeMap::new();
-
-                // Check all not null columns are provided in stmt, also init
-                // `column_index_in_insert`
-                for (idx, column) in schema.columns().iter().enumerate() {
-                    if let Some(tsid_idx) = schema.index_of_tsid() {
-                        if idx == tsid_idx {
-                            // This is a tsid column.
-                            column_index_in_insert.push(InsertMode::Auto);
-                            continue;
-                        }
-                    }
-                    match column_names_idx.get(&column.name) {
-                        Some(idx_in_insert) => {
-                            // This column in schema is also in insert stmt
-                            column_index_in_insert.push(InsertMode::Direct(*idx_in_insert));
-                        }
-                        None => {
-                            // This column in schema is not in insert stmt
-                            if let Some(expr) = &column.default_value {
-                                let expr = df_planner
-                                    .sql_to_expr(
-                                        expr.clone(),
-                                        &df_schema,
-                                        &mut PlannerContext::new(),
-                                    )
-                                    .context(DatafusionExpr)?;
-
-                                default_value_map.insert(idx, expr);
-                                column_index_in_insert.push(InsertMode::Auto);
-                            } else if column.is_nullable {
-                                column_index_in_insert.push(InsertMode::Null);
-                            } else {
-                                // Column can not be null and input does not contains that column
-                                return InsertMissingColumn {
-                                    table: table.name(),
-                                    column: &column.name,
-                                }
-                                .fail();
-                            }
-                        }
-                    }
-                }
-
-                let rows = build_row_group(schema, source, column_index_in_insert)?;
-
-                Ok(Plan::Insert(InsertPlan {
-                    table,
-                    rows,
-                    default_value_map,
-                }))
-            }
-            // We already known this stmt is a INSERT stmt
-            _ => unreachable!(),
-        }
+        todo!();
+        // match sql_stmt {
+        //     SqlStatement::Insert {
+        //         table_name,
+        //         columns,
+        //         source,
+        //         ..
+        //     } => {
+        //         let table_name = TableName::from(table_name).to_string();
+        //
+        //         let table = self
+        //             .find_table(&table_name)?
+        //             .context(TableNotFound { name: table_name })?;
+        //
+        //         let schema = table.schema();
+        //         // Column name and its index in insert stmt: {column name} =>
+        // index         let column_names_idx: HashMap<_, _> = columns
+        //             .iter()
+        //             .enumerate()
+        //             .map(|(idx, ident)| (&ident.value, idx))
+        //             .collect();
+        //         ensure!(
+        //             column_names_idx.len() == columns.len(),
+        //             InsertDuplicateColumns
+        //         );
+        //
+        //         validate_insert_stmt(table.name(), &schema,
+        // &column_names_idx)?;
+        //
+        //         let df_fields = schema
+        //             .columns()
+        //             .iter()
+        //             .map(|column_schema| {
+        //                 DFField::new_unqualified(
+        //                     &column_schema.name,
+        //                     column_schema.data_type.to_arrow_data_type(),
+        //                     column_schema.is_nullable,
+        //                 )
+        //             })
+        //             .collect::<Vec<_>>();
+        //         let df_schema = DFSchema::new_with_metadata(df_fields,
+        // HashMap::new())
+        // .context(CreateDatafusionSchema)?;         let df_planner =
+        //             SqlToRel::new_with_options(&self.meta_provider,
+        // DEFAULT_PARSER_OPTS);
+        //
+        //         // Index in insert values stmt of each column in table schema
+        //         let mut column_index_in_insert =
+        // Vec::with_capacity(schema.num_columns());         // Column
+        // index in schema to its default-value-expr         let mut
+        // default_value_map = BTreeMap::new();
+        //
+        //         // Check all not null columns are provided in stmt, also init
+        //         // `column_index_in_insert`
+        //         for (idx, column) in schema.columns().iter().enumerate() {
+        //             if let Some(tsid_idx) = schema.index_of_tsid() {
+        //                 if idx == tsid_idx {
+        //                     // This is a tsid column.
+        //                     column_index_in_insert.push(InsertMode::Auto);
+        //                     continue;
+        //                 }
+        //             }
+        //             match column_names_idx.get(&column.name) {
+        //                 Some(idx_in_insert) => {
+        //                     // This column in schema is also in insert stmt
+        //
+        // column_index_in_insert.push(InsertMode::Direct(*idx_in_insert));
+        //                 }
+        //                 None => {
+        //                     // This column in schema is not in insert stmt
+        //                     if let Some(expr) = &column.default_value {
+        //                         let expr = df_planner
+        //                             .sql_to_expr(
+        //                                 expr.clone(),
+        //                                 &df_schema,
+        //                                 &mut PlannerContext::new(),
+        //                             )
+        //                             .context(DatafusionExpr)?;
+        //
+        //                         default_value_map.insert(idx, expr);
+        //
+        // column_index_in_insert.push(InsertMode::Auto);
+        // } else if column.is_nullable {
+        // column_index_in_insert.push(InsertMode::Null);
+        // } else {                         // Column can not be null
+        // and input does not contains that column
+        // return InsertMissingColumn {
+        // table: table.name(),                             column:
+        // &column.name,                         }
+        //                         .fail();
+        //                     }
+        //                 }
+        //             }
+        //         }
+        //
+        //         let rows = build_row_group(schema, source,
+        // column_index_in_insert)?;
+        //
+        //         Ok(Plan::Insert(InsertPlan {
+        //             table,
+        //             rows,
+        //             default_value_map,
+        //         }))
+        //     }
+        //     // We already known this stmt is a INSERT stmt
+        //     _ => unreachable!(),
+        // }
     }
 
     fn alter_modify_setting_to_plan(&self, stmt: AlterModifySetting) -> Result<Plan> {

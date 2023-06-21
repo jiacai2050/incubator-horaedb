@@ -99,20 +99,25 @@ impl InsertInterpreter {
 impl Interpreter for InsertInterpreter {
     async fn execute(mut self: Box<Self>) -> InterpreterResult<Output> {
         // Generate tsid if needed.
-        self.maybe_generate_tsid().context(Insert)?;
+        // self.maybe_generate_tsid().context(Insert)?;
         let InsertPlan {
             table,
-            mut rows,
+            rows,
+            columns,
             default_value_map,
         } = self.plan;
 
         // Fill default values
-        fill_default_values(table.clone(), &mut rows, &default_value_map).context(Insert)?;
+        // fill_default_values(table.clone(), &mut rows,
+        // &default_value_map).context(Insert)?;
 
         // Context is unused now
         let _ctx = self.ctx;
 
-        let request = WriteRequest { row_group: rows };
+        let request = WriteRequest {
+            row_group: rows,
+            columns: Some(columns),
+        };
 
         let num_rows = table
             .write(request)

@@ -338,7 +338,10 @@ impl SysCatalogTable {
 
         let row_group = request.into_row_group(self.table.schema())?;
 
-        let write_req = WriteRequest { row_group };
+        let write_req = WriteRequest {
+            row_group,
+            columns: None,
+        };
         self.table.write(write_req).await.context(PersistCatalog)?;
 
         Ok(())
@@ -350,7 +353,10 @@ impl SysCatalogTable {
 
         let row_group = request.into_row_group(self.table.schema())?;
 
-        let write_req = WriteRequest { row_group };
+        let write_req = WriteRequest {
+            row_group,
+            columns: None,
+        };
         self.table.write(write_req).await.context(PersistSchema)?;
 
         Ok(())
@@ -988,7 +994,10 @@ pub struct TableWriter {
 impl TableWriter {
     async fn write(&self) -> Result<()> {
         let row_group = self.convert_table_info_to_row_group()?;
-        let write_req = WriteRequest { row_group };
+        let write_req = WriteRequest {
+            row_group,
+            columns: None,
+        };
         self.catalog_table
             .write(write_req)
             .await

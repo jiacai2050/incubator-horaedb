@@ -15,6 +15,7 @@ use ceresdbproto::storage::{
 };
 use cluster::config::SchemaConfig;
 use common_types::{
+    column::Column,
     column_schema::ColumnSchema,
     datum::{Datum, DatumKind},
     request_id::RequestId,
@@ -754,29 +755,36 @@ fn write_table_request_to_insert_plan(
     write_table_req: WriteTableRequest,
 ) -> Result<InsertPlan> {
     let schema = table.schema();
-
-    let mut rows_total = Vec::new();
-    for write_entry in write_table_req.entries {
-        let mut rows = write_entry_to_rows(
-            &write_table_req.table,
-            &schema,
-            &write_table_req.tag_names,
-            &write_table_req.field_names,
-            write_entry,
-        )?;
-        rows_total.append(&mut rows);
-    }
-    // The row group builder will checks nullable.
-    let row_group = RowGroupBuilder::with_rows(schema, rows_total)
-        .box_err()
-        .with_context(|| ErrWithCause {
-            code: StatusCode::INTERNAL_SERVER_ERROR,
-            msg: format!("Failed to build row group, table:{}", table.name()),
-        })?
-        .build();
+    let columns = write_entry_to_columns(
+        &write_table_req.table,
+        &schema,
+        &write_table_req.tag_names,
+        &write_table_req.field_names,
+        write_table_req.entries,
+    )?;
+    // let mut rows_total = Vec::new();
+    // for write_entry in write_table_req.entries {
+    //     let mut rows = write_entry_to_rows(
+    //         &write_table_req.table,
+    //         &schema,
+    //         &write_table_req.tag_names,
+    //         &write_table_req.field_names,
+    //         write_entry,
+    //     )?;
+    //     rows_total.append(&mut rows);
+    // }
+    // // The row group builder will checks nullable.
+    // let row_group = RowGroupBuilder::with_rows(schema, rows_total)
+    //     .box_err()
+    //     .with_context(|| ErrWithCause {
+    //         code: StatusCode::INTERNAL_SERVER_ERROR,
+    //         msg: format!("Failed to build row group, table:{}", table.name()),
+    //     })?
+    //     .build();
     Ok(InsertPlan {
         table,
-        rows: row_group,
+        rows: RowGroupBuilder::new(schema).build(),
+        columns,
         default_value_map: BTreeMap::new(),
     })
 }
@@ -913,6 +921,186 @@ fn write_entry_to_rows(
     }
 
     Ok(rows)
+}
+
+fn write_entry_to_columns(
+    table_name: &str,
+    schema: &Schema,
+    tag_names: &[String],
+    field_names: &[String],
+    write_series_entries: Vec<WriteSeriesEntry>,
+) -> Result<HashMap<String, Column>> {
+    let mut columns = HashMap::with_capacity(schema.num_columns());
+
+    let row_count = write_series_entries
+        .iter()
+        .map(|v| v.field_groups.len())
+        .sum();
+
+    for write_series_entry in write_series_entries {
+        // Fill tags.
+        for tag in write_series_entry.tags {
+            let name_index = tag.name_index as usize;
+            ensure!(
+                name_index < tag_names.len(),
+                ErrNoCause {
+                    code: StatusCode::BAD_REQUEST,
+                    msg: format!(
+                        "Tag {tag:?} is not found in tag_names:{tag_names:?}, table:{table_name}",
+                    ),
+                }
+            );
+
+            let tag_name = &tag_names[name_index];
+            let tag_index_in_schema = schema.index_of(tag_name).with_context(|| ErrNoCause {
+                code: StatusCode::BAD_REQUEST,
+                msg: format!("Can't find tag({tag_name}) in schema, table:{table_name}"),
+            })?;
+
+            let column_schema = schema.column(tag_index_in_schema);
+            ensure!(
+                column_schema.is_tag,
+                ErrNoCause {
+                    code: StatusCode::BAD_REQUEST,
+                    msg: format!(
+                        "Column({tag_name}) is a field rather than a tag, table:{table_name}"
+                    ),
+                }
+            );
+
+            let tag_value = tag
+                .value
+                .with_context(|| ErrNoCause {
+                    code: StatusCode::BAD_REQUEST,
+                    msg: format!("Tag({tag_name}) value is needed, table:{table_name}"),
+                })?
+                .value
+                .with_context(|| ErrNoCause {
+                    code: StatusCode::BAD_REQUEST,
+                    msg: format!(
+                        "Tag({tag_name}) value type is not supported, table_name:{table_name}"
+                    ),
+                })?;
+            let mut column = Column::new(row_count, column_schema.data_type);
+
+            validate_data_type(table_name, tag_name, &tag_value, column_schema.data_type)?;
+
+            for _ in 0..write_series_entry.field_groups.len() {
+                column
+                    .append(tag_value.clone())
+                    .box_err()
+                    .context(ErrWithCause {
+                        code: StatusCode::BAD_REQUEST,
+                        msg: format!("Append tag value",),
+                    })?;
+            }
+            columns.insert(tag_name.to_string(), column);
+        }
+
+        // Fill fields.
+        let mut field_name_index: HashMap<String, usize> = HashMap::new();
+        for (i, field_group) in write_series_entry.field_groups.into_iter().enumerate() {
+            // timestamp
+            let mut timestamp_column = columns
+                .entry(schema.timestamp_name().to_string())
+                .or_insert_with(|| Column::new(row_count, DatumKind::Timestamp));
+            timestamp_column
+                .append(value::Value::TimestampValue(field_group.timestamp))
+                .expect("Can't panic");
+
+            for field in field_group.fields {
+                if (field.name_index as usize) < field_names.len() {
+                    let field_name = &field_names[field.name_index as usize];
+                    let index_in_schema = if field_name_index.contains_key(field_name) {
+                        field_name_index.get(field_name).unwrap().to_owned()
+                    } else {
+                        let index_in_schema =
+                            schema.index_of(field_name).with_context(|| ErrNoCause {
+                                code: StatusCode::BAD_REQUEST,
+                                msg: format!(
+                                    "Can't find field in schema, table:{table_name}, field_name:{field_name}"
+                                ),
+                            })?;
+                        field_name_index.insert(field_name.to_string(), index_in_schema);
+                        index_in_schema
+                    };
+                    let column_schema = schema.column(index_in_schema);
+                    ensure!(
+                        !column_schema.is_tag,
+                        ErrNoCause {
+                            code: StatusCode::BAD_REQUEST,
+                            msg: format!(
+                            "Column {field_name} is a tag rather than a field, table:{table_name}"
+                        )
+                        }
+                    );
+                    let field_value = field
+                        .value
+                        .with_context(|| ErrNoCause {
+                            code: StatusCode::BAD_REQUEST,
+                            msg: format!("Field({field_name}) is needed, table:{table_name}"),
+                        })?
+                        .value
+                        .with_context(|| ErrNoCause {
+                            code: StatusCode::BAD_REQUEST,
+                            msg: format!(
+                                "Field({field_name}) value type is not supported, table:{table_name}"
+                            ),
+                        })?;
+                    let mut builder = columns
+                        .entry(field_name.to_string())
+                        .or_insert_with(|| Column::new(row_count, column_schema.data_type));
+                    validate_data_type(
+                        table_name,
+                        field_name,
+                        &field_value,
+                        column_schema.data_type,
+                    )?;
+
+                    builder
+                        .append(field_value)
+                        .box_err()
+                        .context(ErrWithCause {
+                            code: StatusCode::BAD_REQUEST,
+                            msg: format!("Append tag value",),
+                        })?;
+                }
+            }
+        }
+    }
+
+    Ok(columns)
+}
+
+fn validate_data_type(
+    table_name: &str,
+    name: &str,
+    value: &value::Value,
+    data_type: DatumKind,
+) -> Result<()> {
+    match (value,data_type){
+        (value::Value::Float64Value(v), DatumKind::Double) => Ok(()),
+        (value::Value::StringValue(v), DatumKind::String) => Ok(()),
+        (value::Value::Int64Value(v), DatumKind::Int64) => Ok(()),
+        (value::Value::Float32Value(v), DatumKind::Float) =>Ok(()),
+        (value::Value::Int32Value(v), DatumKind::Int32) => Ok(()),
+        (value::Value::Int16Value(v), DatumKind::Int16) => Ok(()),
+        (value::Value::Int8Value(v), DatumKind::Int8) =>Ok(()),
+        (value::Value::BoolValue(v), DatumKind::Boolean) => Ok(()),
+        (value::Value::Uint64Value(v), DatumKind::UInt64) => Ok(()),
+        (value::Value::Uint32Value(v), DatumKind::UInt32) => Ok(()),
+        (value::Value::Uint16Value(v), DatumKind::UInt16) => Ok(()),
+        (value::Value::Uint8Value(v), DatumKind::UInt8) => Ok(()),
+        (value::Value::TimestampValue(v), DatumKind::Timestamp) => Ok(()),
+        (value::Value::VarbinaryValue(v), DatumKind::Varbinary) => Ok(()),
+        (v, _) => ErrNoCause {
+            code: StatusCode::BAD_REQUEST,
+            msg: format!(
+                "Value type is not same, table:{table_name}, value_name:{name}, schema_type:{data_type:?}, actual_value:{v:?}"
+            ),
+        }
+            .fail(),
+    }
 }
 
 /// Convert the `Value_oneof_value` defined in protos into the datum.

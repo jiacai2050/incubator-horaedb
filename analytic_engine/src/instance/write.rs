@@ -2,11 +2,22 @@
 
 //! Write logic of instance
 
-use ceresdbproto::{schema as schema_pb, table_requests};
+use std::collections::HashMap;
+
+use bytes::Bytes;
+use ceresdbproto::{
+    schema as schema_pb,
+    storage::{value, Value},
+    table_requests,
+    table_requests::{Column as ColumnPB, ColumnData as ColumnDataPB},
+};
 use common_types::{
     bytes::ByteVec,
-    row::{RowGroup, RowGroupSlicer},
+    column::Column,
+    datum::{Datum, DatumKind},
+    row::{Row, RowGroup, RowGroupSlicer},
     schema::{IndexInWriterSchema, Schema},
+    time::Timestamp,
 };
 use common_util::{codec::row, define_result};
 use log::{debug, error, info, trace, warn};
@@ -347,6 +358,111 @@ impl<'a> MemTableWriter<'a> {
 
         Ok(())
     }
+
+    pub fn write_columns(
+        &self,
+        sequence: SequenceNumber,
+        mut columns: HashMap<String, Column>,
+    ) -> Result<()> {
+        let _timer = self.table_data.metrics.start_table_write_memtable_timer();
+        if columns.is_empty() {
+            return Ok(());
+        }
+
+        let schema = &self.table_data.schema();
+        // Store all memtables we wrote and update their last sequence later.
+        let mut wrote_memtables: SmallVec<[_; 4]> = SmallVec::new();
+        let mut last_mutable_mem: Option<MemTableForWrite> = None;
+        let index_in_writer = IndexInWriterSchema::for_same_schema(schema.num_columns());
+        let mut ctx = PutContext::new(index_in_writer);
+
+        let mut len = 0;
+        for (k, v) in &columns {
+            len = v.len();
+            break;
+        }
+
+        let mut rows = vec![Row::from_datums(Vec::with_capacity(len)); columns.len()];
+        for (i, column_schema) in self.table_data.schema().columns().iter().enumerate() {
+            let column = columns.remove(&column_schema.name).unwrap();
+            for (row_idx, col) in column.into_iter().enumerate() {
+                let datum = convert_proto_value_to_datum(col, column_schema.data_type).unwrap();
+                rows[row_idx].cols.push(datum);
+            }
+        }
+
+        for (row_idx, row) in rows.iter().enumerate() {
+            // TODO(yingwen): Add RowWithSchema and take RowWithSchema as input, then remove
+            // this unwrap()
+            let timestamp = row.timestamp(schema).unwrap();
+            // skip expired row
+            if self.table_data.is_expired(timestamp) {
+                trace!("Skip expired row when write to memtable, row:{:?}", row);
+                continue;
+            }
+            if last_mutable_mem.is_none()
+                || !last_mutable_mem
+                    .as_ref()
+                    .unwrap()
+                    .accept_timestamp(timestamp)
+            {
+                // The time range is not processed by current memtable, find next one.
+                let mutable_mem = self
+                    .table_data
+                    .find_or_create_mutable(timestamp, schema)
+                    .context(FindMutableMemTable {
+                        table: &self.table_data.name,
+                    })?;
+                wrote_memtables.push(mutable_mem.clone());
+                last_mutable_mem = Some(mutable_mem);
+            }
+
+            // We have check the row num is less than `MAX_ROWS_TO_WRITE`, it is safe to
+            // cast it to u32 here
+            let key_seq = KeySequence::new(sequence, row_idx as u32);
+            // TODO(yingwen): Batch sample timestamp in sampling phase.
+            last_mutable_mem
+                .as_ref()
+                .unwrap()
+                .put(&mut ctx, key_seq, row, schema, timestamp)
+                .context(WriteMemTable {
+                    table: &self.table_data.name,
+                })?;
+        }
+
+        // Update last sequence of memtable.
+        for mem_wrote in wrote_memtables {
+            mem_wrote
+                .set_last_sequence(sequence)
+                .context(UpdateMemTableSequence)?;
+        }
+
+        Ok(())
+    }
+}
+
+fn convert_proto_value_to_datum(value: value::Value, data_type: DatumKind) -> Result<Datum> {
+    match (value, data_type) {
+        (value::Value::Float64Value(v), DatumKind::Double) => Ok(Datum::Double(v)),
+        (value::Value::StringValue(v), DatumKind::String) => Ok(Datum::String(v.into())),
+        (value::Value::Int64Value(v), DatumKind::Int64) => Ok(Datum::Int64(v)),
+        (value::Value::Float32Value(v), DatumKind::Float) => Ok(Datum::Float(v)),
+        (value::Value::Int32Value(v), DatumKind::Int32) => Ok(Datum::Int32(v)),
+        (value::Value::Int16Value(v), DatumKind::Int16) => Ok(Datum::Int16(v as i16)),
+        (value::Value::Int8Value(v), DatumKind::Int8) => Ok(Datum::Int8(v as i8)),
+        (value::Value::BoolValue(v), DatumKind::Boolean) => Ok(Datum::Boolean(v)),
+        (value::Value::Uint64Value(v), DatumKind::UInt64) => Ok(Datum::UInt64(v)),
+        (value::Value::Uint32Value(v), DatumKind::UInt32) => Ok(Datum::UInt32(v)),
+        (value::Value::Uint16Value(v), DatumKind::UInt16) => Ok(Datum::UInt16(v as u16)),
+        (value::Value::Uint8Value(v), DatumKind::UInt8) => Ok(Datum::UInt8(v as u8)),
+        (value::Value::TimestampValue(v), DatumKind::Timestamp) => {
+            Ok(Datum::Timestamp(Timestamp::new(v)))
+        }
+        (value::Value::VarbinaryValue(v), DatumKind::Varbinary) => {
+            Ok(Datum::Varbinary(Bytes::from(v)))
+        }
+        (v, _) => todo!(),
+    }
 }
 
 impl<'a> Writer<'a> {
@@ -360,9 +476,10 @@ impl<'a> Writer<'a> {
         self.preprocess_write(&mut encode_ctx).await?;
 
         {
-            let _timer = self.table_data.metrics.start_table_write_encode_timer();
-            let schema = self.table_data.schema();
-            encode_ctx.encode_rows(&schema)?;
+            // let _timer =
+            // self.table_data.metrics.start_table_write_encode_timer();
+            // let schema = self.table_data.schema();
+            // encode_ctx.encode_rows(&schema)?;
         }
 
         let EncodeContext {
@@ -372,31 +489,32 @@ impl<'a> Writer<'a> {
         } = encode_ctx;
 
         let table_data = self.table_data.clone();
-        let split_res = self.maybe_split_write_request(encoded_rows, &row_group);
-        match split_res {
-            SplitResult::Integrate {
-                encoded_rows,
-                row_group,
-            } => {
-                self.write_table_row_group(&table_data, row_group, index_in_writer, encoded_rows)
-                    .await?;
-            }
-            SplitResult::Splitted {
-                encoded_batches,
-                row_group_batches,
-            } => {
-                for (encoded_rows, row_group) in encoded_batches.into_iter().zip(row_group_batches)
-                {
-                    self.write_table_row_group(
-                        &table_data,
-                        row_group,
-                        index_in_writer.clone(),
-                        encoded_rows,
-                    )
-                    .await?;
-                }
-            }
-        }
+        self.write_table_columns(&table_data, request.columns.unwrap());
+        // let split_res = self.maybe_split_write_request(encoded_rows, &row_group);
+        // match split_res {
+        //     SplitResult::Integrate {
+        //         encoded_rows,
+        //         row_group,
+        //     } => {
+        //         self.write_table_row_group(&table_data, row_group, index_in_writer,
+        // encoded_rows)             .await?;
+        //     }
+        //     SplitResult::Splitted {
+        //         encoded_batches,
+        //         row_group_batches,
+        //     } => {
+        //         for (encoded_rows, row_group) in
+        // encoded_batches.into_iter().zip(row_group_batches)         {
+        //             self.write_table_row_group(
+        //                 &table_data,
+        //                 row_group,
+        //                 index_in_writer.clone(),
+        //                 encoded_rows,
+        //             )
+        //             .await?;
+        //         }
+        //     }
+        // }
 
         Ok(row_group.num_rows())
     }
@@ -462,14 +580,55 @@ impl<'a> Writer<'a> {
         Ok(())
     }
 
+    async fn write_table_columns(
+        &mut self,
+        table_data: &TableDataRef,
+        columns: HashMap<String, Column>,
+    ) -> Result<()> {
+        let sequence = self.write_columns_to_wal(&columns).await?;
+        let memtable_writer = MemTableWriter::new(table_data.clone(), self.serial_exec);
+
+        memtable_writer
+            .write_columns(sequence, columns)
+            .map_err(|e| {
+                error!(
+                    "Failed to write to memtable, table:{}, table_id:{}, err:{}",
+                    table_data.name, table_data.id, e
+                );
+                e
+            })?;
+
+        // Failure of writing memtable may cause inconsecutive sequence.
+        if table_data.last_sequence() + 1 != sequence {
+            warn!(
+                "Sequence must be consecutive, table:{}, table_id:{}, last_sequence:{}, wal_sequence:{}",
+                table_data.name,table_data.id,
+                table_data.last_sequence(),
+                sequence
+            );
+        }
+
+        debug!(
+            "Instance write finished, update sequence, table:{}, table_id:{} last_sequence:{}",
+            table_data.name, table_data.id, sequence
+        );
+
+        table_data.set_last_sequence(sequence);
+
+        // Collect metrics.
+        table_data.metrics.on_write_request_done(1);
+
+        Ok(())
+    }
+
     /// Return Ok if the request is valid, this is done before entering the
     /// write thread.
     fn validate_before_write(&self, request: &WriteRequest) -> Result<()> {
         ensure!(
-            request.row_group.num_rows() < MAX_ROWS_TO_WRITE,
+            request.num_rows() < MAX_ROWS_TO_WRITE,
             TooManyRows {
                 table: &self.table_data.name,
-                rows: request.row_group.num_rows(),
+                rows: request.num_rows(),
             }
         );
 
@@ -491,13 +650,13 @@ impl<'a> Writer<'a> {
         );
 
         // Checks schema compatibility.
-        self.table_data
-            .schema()
-            .compatible_for_write(
-                encode_ctx.row_group.schema(),
-                &mut encode_ctx.index_in_writer,
-            )
-            .context(IncompatSchema)?;
+        // self.table_data
+        //     .schema()
+        //     .compatible_for_write(
+        //         encode_ctx.row_group.schema(),
+        //         &mut encode_ctx.index_in_writer,
+        //     )
+        //     .context(IncompatSchema)?;
 
         if self.instance.should_flush_instance() {
             if let Some(space) = self.instance.space_store.find_maximum_memory_usage_space() {
@@ -553,6 +712,67 @@ impl<'a> Writer<'a> {
             // mismatch during replaying
             schema: Some(schema_pb::TableSchema::from(&self.table_data.schema())),
             rows: encoded_rows,
+            column_data: None,
+        };
+
+        // Encode payload
+        let payload = WritePayload::Write(&write_req_pb);
+        let table_location = self.table_data.table_location();
+        let wal_location =
+            instance::create_wal_location(table_location.id, table_location.shard_info);
+        let log_batch_encoder = LogBatchEncoder::create(wal_location);
+        let log_batch = log_batch_encoder.encode(&payload).context(EncodePayloads {
+            table: &self.table_data.name,
+            wal_location,
+        })?;
+
+        // Write to wal manager
+        let write_ctx = WriteContext::default();
+        let sequence = self
+            .instance
+            .space_store
+            .wal_manager
+            .write(&write_ctx, &log_batch)
+            .await
+            .context(WriteLogBatch {
+                table: &self.table_data.name,
+            })?;
+
+        Ok(sequence)
+    }
+
+    async fn write_columns_to_wal(
+        &self,
+        columns: &HashMap<String, Column>,
+    ) -> Result<SequenceNumber> {
+        let mut len = 0;
+        for (k, v) in columns {
+            len = v.len();
+            break;
+        }
+        let _timer = self.table_data.metrics.start_table_write_wal_timer();
+        // Convert into pb
+        let mut pbColumnData = ColumnDataPB {
+            data: HashMap::with_capacity(columns.len()),
+        };
+        for (k, v) in columns.clone().into_iter() {
+            let mut pbColumn = ColumnPB {
+                data: Vec::with_capacity(len),
+            };
+
+            for datum in v {
+                pbColumn.data.push(Value { value: Some(datum) });
+            }
+            pbColumnData.data.insert(k, pbColumn);
+        }
+        let write_req_pb = table_requests::WriteRequest {
+            // FIXME: Shall we avoid the magic number here?
+            version: 0,
+            // Use the table schema instead of the schema in request to avoid schema
+            // mismatch during replaying
+            schema: Some(schema_pb::TableSchema::from(&self.table_data.schema())),
+            rows: Vec::new(),
+            column_data: Some(pbColumnData),
         };
 
         // Encode payload

@@ -9,7 +9,7 @@ use std::{
     sync::Arc,
 };
 
-use common_types::{column_schema::ColumnSchema, row::RowGroup, schema::Schema};
+use common_types::{column::Column, column_schema::ColumnSchema, row::RowGroup, schema::Schema};
 use common_util::define_result;
 use datafusion::logical_expr::{
     expr::Expr as DfLogicalExpr, logical_plan::LogicalPlan as DataFusionLogicalPlan,
@@ -127,6 +127,7 @@ pub struct InsertPlan {
     pub table: TableRef,
     /// RowGroup to insert
     pub rows: RowGroup,
+    pub columns: HashMap<String, Column>,
     /// Column indexes in schema to its default-value-expr which is used to fill
     /// values
     pub default_value_map: BTreeMap<usize, DfLogicalExpr>,

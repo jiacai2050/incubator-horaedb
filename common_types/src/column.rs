@@ -15,9 +15,15 @@ use arrow::{
     datatypes::DataType,
     error::ArrowError,
 };
+use ceresdbproto::storage::value;
 use snafu::{ResultExt, Snafu};
+use sqlparser::ast::Value;
 
-use crate::{bitset::BitSet, datum::DatumKind};
+use crate::{
+    bitset::BitSet,
+    datum::{Datum, DatumKind},
+    string::StringBytes,
+};
 
 #[derive(Debug, Snafu)]
 #[allow(missing_copy_implementations, missing_docs)]
@@ -46,6 +52,33 @@ pub struct Column {
     pub(crate) datum_kind: DatumKind,
     pub(crate) valid: BitSet,
     pub(crate) data: ColumnData,
+    pub(crate) to_insert: usize,
+}
+
+// impl Iterator for Column{
+//     type Item = value::Value;
+//
+//     fn next(&mut self) -> Option<Self::Item> {
+//         match &mut self.data {
+//             ColumnData::F64(col_data) =>
+// Some(value::Value::Float64Value(col_data.next()?)),
+// ColumnData::I64(col_data) =>
+// Some(value::Value::Int64Value(col_data.next()?)),
+// ColumnData::U64(col_data) =>
+// Some(value::Value::Uint64Value(col_data.next()?)),
+// ColumnData::String(col_data) =>
+// Some(value::Value::StringValue(col_data.next()?)),
+// ColumnData::Bool(col_data) => todo!(),         }
+//     }
+// }
+
+impl IntoIterator for Column {
+    type IntoIter = ColumnDataIter;
+    type Item = value::Value;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.data.into_iter()
+    }
 }
 
 /// The data for a column
@@ -71,9 +104,46 @@ impl std::fmt::Display for ColumnData {
     }
 }
 
+pub enum ColumnDataIter {
+    F64(std::vec::IntoIter<f64>),
+    I64(std::vec::IntoIter<i64>),
+    U64(std::vec::IntoIter<u64>),
+    String(std::vec::IntoIter<String>),
+    Bool(std::vec::IntoIter<bool>),
+}
+
+impl<'a> Iterator for ColumnDataIter {
+    type Item = value::Value;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::F64(col_data) => col_data.next().map(|x| value::Value::Float64Value(x)),
+            Self::I64(col_data) => col_data.next().map(|x| value::Value::Int64Value(x)),
+            Self::U64(col_data) => col_data.next().map(|x| value::Value::Uint64Value(x)),
+            Self::String(col_data) => col_data.next().map(|x| value::Value::StringValue(x)),
+            Self::Bool(col_data) => col_data.next().map(|x| value::Value::BoolValue(x)),
+        }
+    }
+}
+
+impl IntoIterator for ColumnData {
+    type IntoIter = ColumnDataIter;
+    type Item = value::Value;
+
+    fn into_iter(self) -> Self::IntoIter {
+        match self {
+            Self::F64(col_data) => ColumnDataIter::F64(col_data.into_iter()),
+            Self::I64(col_data) => ColumnDataIter::I64(col_data.into_iter()),
+            Self::U64(col_data) => ColumnDataIter::U64(col_data.into_iter()),
+            Self::String(col_data) => ColumnDataIter::String(col_data.into_iter()),
+            Self::Bool(col_data) => todo!(),
+        }
+    }
+}
+
 impl Column {
     #[allow(dead_code)]
-    pub(crate) fn new(row_count: usize, datum_kind: DatumKind) -> Self {
+    pub fn new(row_count: usize, datum_kind: DatumKind) -> Self {
         let mut valid = BitSet::new();
         valid.append_unset(row_count);
 
@@ -94,11 +164,34 @@ impl Column {
             datum_kind,
             valid,
             data,
+            to_insert: 0,
         }
     }
 
+    pub fn append(&mut self, value: value::Value) -> Result<()> {
+        match (&mut self.data, value) {
+            (ColumnData::F64(data), value::Value::Float64Value(v)) => data[self.to_insert] = v,
+            (
+                ColumnData::I64(data),
+                value::Value::Int64Value(v) | value::Value::TimestampValue(v),
+            ) => data[self.to_insert] = v,
+            (ColumnData::U64(data), value::Value::Uint64Value(v)) => data[self.to_insert] = v,
+            (ColumnData::String(data), value::Value::StringValue(v)) => data[self.to_insert] = v,
+            (ColumnData::Bool(data), value::Value::BoolValue(v)) => {
+                if v {
+                    data.set(self.to_insert);
+                }
+            }
+
+            _ => todo!(),
+        }
+        self.valid.set(self.to_insert);
+        self.to_insert += 1;
+        Ok(())
+    }
+
     /// Returns the [`DatumKind`] of this column
-    pub fn datum_kine(&self) -> DatumKind {
+    pub fn datum_kind(&self) -> DatumKind {
         self.datum_kind
     }
 

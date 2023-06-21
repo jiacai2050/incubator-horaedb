@@ -15,6 +15,7 @@ use std::{
 use async_trait::async_trait;
 use ceresdbproto::sys_catalog as sys_catalog_pb;
 use common_types::{
+    column::Column,
     column_schema::ColumnSchema,
     datum::Datum,
     projected_schema::ProjectedSchema,
@@ -294,6 +295,18 @@ impl fmt::Display for TableId {
 pub struct WriteRequest {
     /// rows to write
     pub row_group: RowGroup,
+    pub columns: Option<HashMap<String, Column>>,
+}
+
+impl WriteRequest {
+    pub fn num_rows(&self) -> usize {
+        if let Some(columns) = &self.columns {
+            for (k, v) in columns {
+                return v.len();
+            }
+        }
+        self.row_group.num_rows()
+    }
 }
 
 #[derive(Clone, Debug)]

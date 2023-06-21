@@ -209,7 +209,10 @@ impl TryFrom<ceresdbproto::remote_engine::WriteRequest> for WriteRequest {
 
         Ok(Self {
             table: table_identifier.into(),
-            write_request: TableWriteRequest { row_group },
+            write_request: TableWriteRequest {
+                row_group,
+                columns: None,
+            },
         })
     }
 }

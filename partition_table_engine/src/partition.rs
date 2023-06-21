@@ -163,7 +163,10 @@ impl Table for PartitionTableImpl {
 
             let request = RemoteWriteRequest {
                 table: sub_table_ident,
-                write_request: WriteRequest { row_group },
+                write_request: WriteRequest {
+                    row_group,
+                    columns: None,
+                },
             };
             request_batch.push(request);
         }

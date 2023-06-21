@@ -6,7 +6,8 @@ use std::{collections::HashMap, fmt, sync::Mutex};
 
 use async_trait::async_trait;
 use common_types::{
-    row::{Row, RowGroupBuilder},
+    row::{Row, RowGroup, RowGroupBuilder},
+    schema,
     schema::Schema,
     time::TimeRange,
 };
@@ -215,22 +216,45 @@ fn merge_pending_write_requests(
 ) -> WriteRequest {
     assert!(!pending_writes.is_empty());
 
-    let mut last_req = pending_writes.pop().unwrap();
-    let last_rows = last_req.row_group.take_rows();
-    let schema = last_req.row_group.into_schema();
-    let mut row_group_builder = RowGroupBuilder::with_capacity(schema, num_pending_rows);
+    let mut columns = HashMap::new();
+    for req in pending_writes {
+        if let Some(v) = req.columns {
+            for (name, col) in v {
+                let column = columns.entry(name).or_insert_with(|| {
+                    common_types::column::Column::new(num_pending_rows, col.datum_kind())
+                });
 
-    for mut pending_req in pending_writes {
-        let rows = pending_req.row_group.take_rows();
-        for row in rows {
-            row_group_builder.push_checked_row(row)
+                for c in col.into_iter() {
+                    column.append(c).expect("append column failed");
+                }
+            }
         }
     }
-    for row in last_rows {
-        row_group_builder.push_checked_row(row);
+    WriteRequest {
+        row_group: RowGroupBuilder::new(schema::Builder::new().build().unwrap()).build(),
+        columns: Some(columns),
     }
-    let row_group = row_group_builder.build();
-    WriteRequest { row_group }
+
+    // let mut last_req = pending_writes.pop().unwrap();
+    // let last_rows = last_req.row_group.take_rows();
+    // let schema = last_req.row_group.into_schema();
+    // let mut row_group_builder = RowGroupBuilder::with_capacity(schema,
+    // num_pending_rows);
+    //
+    // for mut pending_req in pending_writes {
+    //     let rows = pending_req.row_group.take_rows();
+    //     for row in rows {
+    //         row_group_builder.push_checked_row(row)
+    //     }
+    // }
+    // for row in last_rows {
+    //     row_group_builder.push_checked_row(row);
+    // }
+    // let row_group = row_group_builder.build();
+    // WriteRequest {
+    //     row_group,
+    //     columns: None,
+    // }
 }
 
 impl TableImpl {
@@ -339,7 +363,7 @@ impl TableImpl {
 
     #[inline]
     fn should_queue_write_request(&self, request: &WriteRequest) -> bool {
-        request.row_group.num_rows() < self.instance.max_rows_in_write_queue
+        request.num_rows() < self.instance.max_rows_in_write_queue
     }
 }
 
