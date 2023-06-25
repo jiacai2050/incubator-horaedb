@@ -4,7 +4,7 @@
 
 //! A [`Column`] stores the rows for a given column name
 
-use std::{fmt::Formatter, mem, sync::Arc};
+use std::{fmt::Formatter, mem, slice::Iter, sync::Arc};
 
 use arrow::{
     array::{
@@ -57,20 +57,32 @@ pub struct Column {
     pub(crate) to_insert: usize,
 }
 
-// impl Iterator for Column{
+// impl Iterator for Column {
 //     type Item = value::Value;
 //
 //     fn next(&mut self) -> Option<Self::Item> {
-//         match &mut self.data {
-//             ColumnData::F64(col_data) =>
-// Some(value::Value::Float64Value(col_data.next()?)),
-// ColumnData::I64(col_data) =>
-// Some(value::Value::Int64Value(col_data.next()?)),
-// ColumnData::U64(col_data) =>
-// Some(value::Value::Uint64Value(col_data.next()?)),
-// ColumnData::String(col_data) =>
-// Some(value::Value::StringValue(col_data.next()?)),
-// ColumnData::Bool(col_data) => todo!(),         }
+//         // match &mut self.data {
+//         //     ColumnData::F64(col_data) =>
+//         //         Some(value::Value::Float64Value(col_data.next()?)),
+//         //     ColumnData::I64(col_data) =>
+//         //         Some(value::Value::Int64Value(col_data.next()?)),
+//         //     ColumnData::U64(col_data) =>
+//         //         Some(value::Value::Uint64Value(col_data.next()?)),
+//         //     ColumnData::String(col_data) =>
+//         //         Some(value::Value::StringValue(col_data.next()?)),
+//         //     ColumnData::Varbinary(col_data) =>
+//         //         Some(value::Value::VarbinaryValue(col_data.next()?)),
+//         //     ColumnData::Bool(col_data) => todo!(),
+//         // }
+//         match self.data {
+//             Self::F64(col_data) => ColumnDataIter::F64(col_data.into_iter()),
+//             Self::I64(col_data) => ColumnDataIter::I64(col_data.into_iter()),
+//             Self::U64(col_data) => ColumnDataIter::U64(col_data.into_iter()),
+//             Self::String(col_data) =>
+// ColumnDataIter::String(col_data.into_iter()),
+// Self::Varbinary(col_data) => ColumnDataIter::Varbinary(col_data.into_iter()),
+//             Self::Bool(col_data) => todo!(),
+//         }
 //     }
 // }
 
@@ -209,6 +221,17 @@ impl Column {
             ColumnData::String(ref data) => Datum::String(data[idx].clone().into()),
             ColumnData::Varbinary(ref data) => Datum::Varbinary(Bytes::from(data[idx].clone())),
             ColumnData::Bool(ref data) => Datum::Boolean(data.get(idx)),
+        }
+    }
+
+    pub fn get_value(&self, idx: usize) -> value::Value {
+        match self.data {
+            ColumnData::F64(ref data) => value::Value::Float64Value(data[idx]),
+            ColumnData::I64(ref data) => value::Value::Int64Value(data[idx]),
+            ColumnData::U64(ref data) => value::Value::Uint64Value(data[idx]),
+            ColumnData::String(ref data) => value::Value::StringValue(data[idx].clone().into()),
+            ColumnData::Varbinary(ref data) => value::Value::VarbinaryValue(data[idx].clone()),
+            ColumnData::Bool(ref data) => value::Value::BoolValue(data.get(idx)),
         }
     }
 

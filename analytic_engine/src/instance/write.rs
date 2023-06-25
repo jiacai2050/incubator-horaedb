@@ -772,15 +772,17 @@ impl<'a> Writer<'a> {
         let mut pbColumnData = ColumnDataPB {
             data: HashMap::with_capacity(columns.len()),
         };
-        for (k, v) in columns.clone().into_iter() {
+        for (k, v) in columns {
             let mut pbColumn = ColumnPB {
                 data: Vec::with_capacity(len),
             };
-
-            for datum in v {
-                pbColumn.data.push(Value { value: Some(datum) });
+            for i in 0..v.len() {
+                pbColumn.data.push(Value {
+                    value: Some(v.get_value(i)),
+                });
             }
-            pbColumnData.data.insert(k, pbColumn);
+
+            pbColumnData.data.insert(k.clone(), pbColumn);
         }
         let write_req_pb = table_requests::WriteRequest {
             // FIXME: Shall we avoid the magic number here?
