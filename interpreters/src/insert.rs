@@ -10,7 +10,9 @@ use std::{
 
 use arrow::{array::ArrayRef, error::ArrowError, record_batch::RecordBatch};
 use async_trait::async_trait;
+use ceresdbproto::storage::value;
 use common_types::{
+    column::Column,
     column_block::{ColumnBlock, ColumnBlockBuilder},
     column_schema::ColumnId,
     datum::Datum,
@@ -99,7 +101,7 @@ impl InsertInterpreter {
 impl Interpreter for InsertInterpreter {
     async fn execute(mut self: Box<Self>) -> InterpreterResult<Output> {
         // Generate tsid if needed.
-        // self.maybe_generate_tsid().context(Insert)?;
+        self.maybe_generate_tsid().context(Insert)?;
         let InsertPlan {
             table,
             rows,
@@ -134,35 +136,68 @@ impl InsertInterpreter {
         let schema = self.plan.rows.schema();
         let tsid_idx = schema.index_of_tsid();
 
-        if let Some(idx) = tsid_idx {
-            // Vec of (`index of tag`, `column id of tag`).
-            let tag_idx_column_ids: Vec<_> = schema
-                .columns()
-                .iter()
-                .enumerate()
-                .filter_map(|(i, column)| {
-                    if column.is_tag {
-                        Some((i, column.id))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            let mut hash_bytes = Vec::new();
-            for i in 0..self.plan.rows.num_rows() {
-                let row = self.plan.rows.get_row_mut(i).unwrap();
-
-                let mut tsid_builder = TsidBuilder::new(&mut hash_bytes);
-
-                for (idx, column_id) in &tag_idx_column_ids {
-                    tsid_builder.maybe_write_datum(*column_id, &row[*idx])?;
-                }
-
-                let tsid = tsid_builder.finish();
-                row[idx] = Datum::UInt64(tsid);
-            }
+        let mut num_rows = 0;
+        for (_, col) in &self.plan.columns {
+            num_rows = col.len();
+            break;
         }
+
+        if let Some(tsid_column_schema) = schema.tsid_column() {
+            let mut tsid_column = Column::new(num_rows, tsid_column_schema.data_type);
+
+            for i in 0..num_rows {
+                // let tsid_column = self
+                //     .plan
+                //     .columns
+                //     .entry(tsid_column_schema.name.clone())
+                //     .or_insert_with(|| );
+                let mut hash_bytes = Vec::new();
+                let mut tsid_builder = TsidBuilder::new(&mut hash_bytes);
+                for column in schema.columns() {
+                    if column.is_tag {
+                        let tag_column = self.plan.columns.get(column.name.as_str()).unwrap();
+                        let tag_value = tag_column.get_datum(i);
+                        tsid_builder.maybe_write_datum(column.id, &tag_value)?;
+                    }
+                }
+                tsid_column
+                    .append(value::Value::Uint64Value(tsid_builder.finish()))
+                    .unwrap();
+            }
+            self.plan
+                .columns
+                .insert(tsid_column_schema.name.clone(), tsid_column);
+        }
+
+        // if let Some(idx) = tsid_idx {
+        //     // Vec of (`index of tag`, `column id of tag`).
+        //     let tag_idx_column_ids: Vec<_> = schema
+        //         .columns()
+        //         .iter()
+        //         .enumerate()
+        //         .filter_map(|(i, column)| {
+        //             if column.is_tag {
+        //                 Some((i, column.id))
+        //             } else {
+        //                 None
+        //             }
+        //         })
+        //         .collect();
+        //
+        //     let mut hash_bytes = Vec::new();
+        //     for i in 0..self.plan.rows.num_rows() {
+        //         let row = self.plan.rows.get_row_mut(i).unwrap();
+        //
+        //         let mut tsid_builder = TsidBuilder::new(&mut hash_bytes);
+        //
+        //         for (idx, column_id) in &tag_idx_column_ids {
+        //             tsid_builder.maybe_write_datum(*column_id, &row[*idx])?;
+        //         }
+        //
+        //         let tsid = tsid_builder.finish();
+        //         row[idx] = Datum::UInt64(tsid);
+        //     }
+        // }
         Ok(())
     }
 }

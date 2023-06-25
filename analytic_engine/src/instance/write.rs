@@ -382,7 +382,8 @@ impl<'a> MemTableWriter<'a> {
             break;
         }
 
-        let mut rows = vec![Row::from_datums(Vec::with_capacity(len)); columns.len()];
+        let mut rows = vec![Row::from_datums(Vec::with_capacity(columns.len())); len];
+
         for (i, column_schema) in self.table_data.schema().columns().iter().enumerate() {
             let column = columns.remove(&column_schema.name).unwrap();
             for (row_idx, col) in column.into_iter().enumerate() {
@@ -390,7 +391,6 @@ impl<'a> MemTableWriter<'a> {
                 rows[row_idx].cols.push(datum);
             }
         }
-
         for (row_idx, row) in rows.iter().enumerate() {
             // TODO(yingwen): Add RowWithSchema and take RowWithSchema as input, then remove
             // this unwrap()
@@ -446,6 +446,9 @@ fn convert_proto_value_to_datum(value: value::Value, data_type: DatumKind) -> Re
         (value::Value::Float64Value(v), DatumKind::Double) => Ok(Datum::Double(v)),
         (value::Value::StringValue(v), DatumKind::String) => Ok(Datum::String(v.into())),
         (value::Value::Int64Value(v), DatumKind::Int64) => Ok(Datum::Int64(v)),
+        (value::Value::Int64Value(v), DatumKind::Timestamp) => {
+            Ok(Datum::Timestamp(Timestamp::new(v)))
+        }
         (value::Value::Float32Value(v), DatumKind::Float) => Ok(Datum::Float(v)),
         (value::Value::Int32Value(v), DatumKind::Int32) => Ok(Datum::Int32(v)),
         (value::Value::Int16Value(v), DatumKind::Int16) => Ok(Datum::Int16(v as i16)),
@@ -461,7 +464,10 @@ fn convert_proto_value_to_datum(value: value::Value, data_type: DatumKind) -> Re
         (value::Value::VarbinaryValue(v), DatumKind::Varbinary) => {
             Ok(Datum::Varbinary(Bytes::from(v)))
         }
-        (v, _) => todo!(),
+        (v, d) => {
+            error!("Unexpected value type, value:{:?}, datum:{:?}", v, d);
+            todo!();
+        }
     }
 }
 
@@ -489,7 +495,18 @@ impl<'a> Writer<'a> {
         } = encode_ctx;
 
         let table_data = self.table_data.clone();
-        self.write_table_columns(&table_data, request.columns.unwrap());
+        // if let Some(columns) = request.columns {
+        //     self.write_table_columns(&table_data, columns);
+        // }
+        //             self.write_table_row_group(
+        //                 &table_data,
+        //                 row_group,
+        //                 index_in_writer.clone(),
+        //                 encoded_rows,
+        //             )
+        //             .await?;
+        self.write_table_columns(&table_data, request.columns.unwrap())
+            .await?;
         // let split_res = self.maybe_split_write_request(encoded_rows, &row_group);
         // match split_res {
         //     SplitResult::Integrate {

@@ -6,9 +6,13 @@ use std::{collections::HashMap, mem};
 
 use async_trait::async_trait;
 use catalog::consts;
-use ceresdbproto::sys_catalog::{CatalogEntry, SchemaEntry, TableEntry};
+use ceresdbproto::{
+    storage::value,
+    sys_catalog::{CatalogEntry, SchemaEntry, TableEntry},
+};
 use common_types::{
     bytes::{BufMut, Bytes, BytesMut, SafeBuf, SafeBufMut},
+    column::Column,
     column_schema,
     datum::{Datum, DatumKind},
     projected_schema::ProjectedSchema,
@@ -33,6 +37,7 @@ use table_engine::{
         CreateTableRequest, DropTableRequest, OpenTableRequest, TableEngineRef, TableRequestType,
         TableState,
     },
+    partition::PartitionInfo::Hash,
     predicate::PredicateBuilder,
     table::{
         GetRequest, ReadOptions, ReadOrder, ReadRequest, SchemaId, TableId, TableInfo, TableRef,
@@ -336,11 +341,42 @@ impl SysCatalogTable {
     pub async fn create_catalog(&self, request: CreateCatalogRequest) -> Result<()> {
         info!("Add catalog to sys_catalog table, request:{:?}", request);
 
-        let row_group = request.into_row_group(self.table.schema())?;
+        let row_group = request.clone().into_row_group(self.table.schema())?;
+
+        let mut columns = HashMap::with_capacity(self.table.schema().num_columns());
+        {
+            let mut column = Column::new(1, DatumKind::Varbinary);
+            column
+                .append(value::Value::VarbinaryValue(
+                    request.to_key().unwrap().to_vec(),
+                ))
+                .unwrap();
+            columns.insert(KEY_COLUMN_NAME.to_string(), column);
+        }
+
+        {
+            let mut column = Column::new(1, DatumKind::Int64);
+            column.append(value::Value::TimestampValue(0)).unwrap();
+            columns.insert(TIMESTAMP_COLUMN_NAME.to_string(), column);
+        }
+
+        {
+            let mut column = Column::new(1, DatumKind::Varbinary);
+            column
+                .append(value::Value::VarbinaryValue(request.into_bytes().to_vec()))
+                .unwrap();
+            columns.insert(VALUE_COLUMN_NAME.to_string(), column);
+        }
+
+        // for column_schema in self.table.schema().columns() {
+        //     let mut column = Column::new(1,column_schema.data_type);
+        //     column.append()
+        //     columns.insert(column_schema.name.to_string(), Column::new(1,));
+        // }
 
         let write_req = WriteRequest {
             row_group,
-            columns: None,
+            columns: Some(columns),
         };
         self.table.write(write_req).await.context(PersistCatalog)?;
 
@@ -351,11 +387,36 @@ impl SysCatalogTable {
     pub async fn create_schema(&self, request: CreateSchemaRequest) -> Result<()> {
         info!("Add schema to sys_catalog table, request:{:?}", request);
 
-        let row_group = request.into_row_group(self.table.schema())?;
+        let row_group = request.clone().into_row_group(self.table.schema())?;
+
+        let mut columns = HashMap::with_capacity(self.table.schema().num_columns());
+        {
+            let mut column = Column::new(1, DatumKind::Varbinary);
+            column
+                .append(value::Value::VarbinaryValue(
+                    request.to_key().unwrap().to_vec(),
+                ))
+                .unwrap();
+            columns.insert(KEY_COLUMN_NAME.to_string(), column);
+        }
+
+        {
+            let mut column = Column::new(1, DatumKind::Int64);
+            column.append(value::Value::TimestampValue(0)).unwrap();
+            columns.insert(TIMESTAMP_COLUMN_NAME.to_string(), column);
+        }
+
+        {
+            let mut column = Column::new(1, DatumKind::Varbinary);
+            column
+                .append(value::Value::VarbinaryValue(request.into_bytes().to_vec()))
+                .unwrap();
+            columns.insert(VALUE_COLUMN_NAME.to_string(), column);
+        }
 
         let write_req = WriteRequest {
             row_group,
-            columns: None,
+            columns: Some(columns),
         };
         self.table.write(write_req).await.context(PersistSchema)?;
 
@@ -845,7 +906,7 @@ impl<'a> Encoder<TableKey<'a>> for EntryKeyEncoder {
 }
 
 /// Information of the catalog to add
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CreateCatalogRequest {
     /// Catalog name
     pub catalog_name: String,
@@ -874,7 +935,7 @@ impl CreateCatalogRequest {
         Ok(builder.build())
     }
 
-    fn to_key(&self) -> Result<Bytes> {
+    pub fn to_key(&self) -> Result<Bytes> {
         let encoder = EntryKeyEncoder;
         let key = CatalogKey(&self.catalog_name);
         let mut buf = BytesMut::with_capacity(encoder.estimate_encoded_size(&key));
@@ -882,7 +943,7 @@ impl CreateCatalogRequest {
         Ok(buf.into())
     }
 
-    fn into_bytes(self) -> Bytes {
+    pub fn into_bytes(self) -> Bytes {
         let entry = CatalogEntry::from(self);
         entry.encode_to_vec().into()
     }
@@ -906,7 +967,7 @@ impl From<CatalogEntry> for CreateCatalogRequest {
 }
 
 /// Information of the schema to add.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct CreateSchemaRequest {
     pub catalog_name: String,
     pub schema_name: String,
@@ -936,7 +997,7 @@ impl CreateSchemaRequest {
         Ok(builder.build())
     }
 
-    fn to_key(&self) -> Result<Bytes> {
+    pub fn to_key(&self) -> Result<Bytes> {
         let encoder = EntryKeyEncoder;
         let key = SchemaKey(&self.catalog_name, &self.schema_name);
         let mut buf = BytesMut::with_capacity(encoder.estimate_encoded_size(&key));
@@ -944,7 +1005,7 @@ impl CreateSchemaRequest {
         Ok(buf.into())
     }
 
-    fn into_bytes(self) -> Bytes {
+    pub fn into_bytes(self) -> Bytes {
         let entry = SchemaEntry::from(self);
 
         entry.encode_to_vec().into()
@@ -994,9 +1055,37 @@ pub struct TableWriter {
 impl TableWriter {
     async fn write(&self) -> Result<()> {
         let row_group = self.convert_table_info_to_row_group()?;
+
+        let mut columns = HashMap::with_capacity(3);
+        {
+            let mut column = Column::new(1, DatumKind::Varbinary);
+            column
+                .append(value::Value::VarbinaryValue(
+                    Self::build_create_table_key(&self.table_to_write)?.to_vec(),
+                ))
+                .unwrap();
+            columns.insert(KEY_COLUMN_NAME.to_string(), column);
+        }
+
+        {
+            let mut column = Column::new(1, DatumKind::Int64);
+            column.append(value::Value::TimestampValue(0)).unwrap();
+            columns.insert(TIMESTAMP_COLUMN_NAME.to_string(), column);
+        }
+
+        {
+            let mut column = Column::new(1, DatumKind::Varbinary);
+            column
+                .append(value::Value::VarbinaryValue(
+                    Self::build_create_table_value(self.table_to_write.clone(), self.typ)?.to_vec(),
+                ))
+                .unwrap();
+            columns.insert(VALUE_COLUMN_NAME.to_string(), column);
+        }
+
         let write_req = WriteRequest {
             row_group,
-            columns: None,
+            columns: Some(columns),
         };
         self.catalog_table
             .write(write_req)

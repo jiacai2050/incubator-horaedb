@@ -15,6 +15,7 @@ arrow = { workspace = true }
 # In alphabetical order
 async-trait = { workspace = true }
 catalog = { workspace = true }
+ceresdbproto = { workspace = true }
 common_types = { workspace = true }
 common_util = { workspace = true }
 datafusion = { workspace = true }

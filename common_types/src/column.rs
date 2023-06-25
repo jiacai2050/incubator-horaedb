@@ -8,14 +8,16 @@ use std::{fmt::Formatter, mem, sync::Arc};
 
 use arrow::{
     array::{
-        ArrayDataBuilder, ArrayRef, BooleanArray, Float64Array, Int64Array, StringArray,
-        TimestampNanosecondArray, UInt64Array,
+        ArrayDataBuilder, ArrayRef, BinaryArray, BooleanArray, Float64Array, Int64Array,
+        StringArray, TimestampNanosecondArray, UInt64Array,
     },
     buffer::NullBuffer,
     datatypes::DataType,
     error::ArrowError,
 };
+use bytes_ext::Bytes;
 use ceresdbproto::storage::value;
+use datafusion::parquet::data_type::AsBytes;
 use snafu::{ResultExt, Snafu};
 use sqlparser::ast::Value;
 
@@ -89,6 +91,7 @@ pub enum ColumnData {
     I64(Vec<i64>),
     U64(Vec<u64>),
     String(Vec<String>),
+    Varbinary(Vec<Vec<u8>>),
     Bool(BitSet),
 }
 
@@ -99,6 +102,7 @@ impl std::fmt::Display for ColumnData {
             Self::I64(col_data) => write!(f, "I64({})", col_data.len()),
             Self::U64(col_data) => write!(f, "U64({})", col_data.len()),
             Self::String(col_data) => write!(f, "String({})", col_data.len()),
+            Self::Varbinary(col_data) => write!(f, "Varbinary({})", col_data.len()),
             Self::Bool(col_data) => write!(f, "Bool({})", col_data.len()),
         }
     }
@@ -109,6 +113,7 @@ pub enum ColumnDataIter {
     I64(std::vec::IntoIter<i64>),
     U64(std::vec::IntoIter<u64>),
     String(std::vec::IntoIter<String>),
+    Varbinary(std::vec::IntoIter<Vec<u8>>),
     Bool(std::vec::IntoIter<bool>),
 }
 
@@ -121,6 +126,7 @@ impl<'a> Iterator for ColumnDataIter {
             Self::I64(col_data) => col_data.next().map(|x| value::Value::Int64Value(x)),
             Self::U64(col_data) => col_data.next().map(|x| value::Value::Uint64Value(x)),
             Self::String(col_data) => col_data.next().map(|x| value::Value::StringValue(x)),
+            Self::Varbinary(col_data) => col_data.next().map(|x| value::Value::VarbinaryValue(x)),
             Self::Bool(col_data) => col_data.next().map(|x| value::Value::BoolValue(x)),
         }
     }
@@ -136,6 +142,7 @@ impl IntoIterator for ColumnData {
             Self::I64(col_data) => ColumnDataIter::I64(col_data.into_iter()),
             Self::U64(col_data) => ColumnDataIter::U64(col_data.into_iter()),
             Self::String(col_data) => ColumnDataIter::String(col_data.into_iter()),
+            Self::Varbinary(col_data) => ColumnDataIter::Varbinary(col_data.into_iter()),
             Self::Bool(col_data) => todo!(),
         }
     }
@@ -157,6 +164,7 @@ impl Column {
             DatumKind::Double => ColumnData::F64(vec![0.0; row_count]),
             DatumKind::Int64 | DatumKind::Timestamp => ColumnData::I64(vec![0; row_count]),
             DatumKind::String => ColumnData::String(vec!["".to_string(); row_count]),
+            DatumKind::Varbinary => ColumnData::Varbinary(vec![vec![]; row_count]),
             _ => todo!(),
         };
 
@@ -177,17 +185,31 @@ impl Column {
             ) => data[self.to_insert] = v,
             (ColumnData::U64(data), value::Value::Uint64Value(v)) => data[self.to_insert] = v,
             (ColumnData::String(data), value::Value::StringValue(v)) => data[self.to_insert] = v,
+            (ColumnData::Varbinary(data), value::Value::VarbinaryValue(v)) => {
+                data[self.to_insert] = v;
+            }
             (ColumnData::Bool(data), value::Value::BoolValue(v)) => {
                 if v {
                     data.set(self.to_insert);
                 }
             }
 
-            _ => todo!(),
+            (c, v) => println!("c: {:?}, v: {:?}", c, v),
         }
         self.valid.set(self.to_insert);
         self.to_insert += 1;
         Ok(())
+    }
+
+    pub fn get_datum(&self, idx: usize) -> Datum {
+        match self.data {
+            ColumnData::F64(ref data) => Datum::Double(data[idx]),
+            ColumnData::I64(ref data) => Datum::Int64(data[idx]),
+            ColumnData::U64(ref data) => Datum::UInt64(data[idx]),
+            ColumnData::String(ref data) => Datum::String(data[idx].clone().into()),
+            ColumnData::Varbinary(ref data) => Datum::Varbinary(Bytes::from(data[idx].clone())),
+            ColumnData::Bool(ref data) => Datum::Boolean(data.get(idx)),
+        }
     }
 
     /// Returns the [`DatumKind`] of this column
@@ -229,6 +251,9 @@ impl Column {
             ColumnData::String(data) => {
                 data.resize(len, "".to_string());
             }
+            ColumnData::Varbinary(data) => {
+                data.resize(len, vec![]);
+            }
             ColumnData::Bool(data) => {
                 data.append_unset(delta);
             }
@@ -258,6 +283,9 @@ impl Column {
                 v.iter().map(|s| s.len()).sum::<usize>()
                     + (v.capacity() - v.len()) * mem::size_of::<String>()
             }
+            ColumnData::Varbinary(v) => {
+                v.iter().map(|s| s.len()).sum::<usize>() + (v.capacity() - v.len())
+            }
         };
         mem::size_of::<Self>() + data_size + self.valid.byte_len()
     }
@@ -272,6 +300,7 @@ impl Column {
             ColumnData::U64(_) => mem::size_of::<u64>() * self.len(),
             ColumnData::Bool(_) => mem::size_of::<bool>() * self.len(),
             ColumnData::String(v) => v.iter().map(|s| s.len()).sum(),
+            ColumnData::Varbinary(v) => v.iter().map(|s| s.len()).sum(),
         }
     }
 
@@ -323,6 +352,11 @@ impl Column {
             ColumnData::String(data) => {
                 let data =
                     StringArray::from(data.iter().map(|s| Some(s.as_str())).collect::<Vec<_>>());
+                Arc::new(data)
+            }
+            ColumnData::Varbinary(data) => {
+                let data =
+                    BinaryArray::from(data.iter().map(|s| Some(s.as_bytes())).collect::<Vec<_>>());
                 Arc::new(data)
             }
             ColumnData::Bool(data) => {

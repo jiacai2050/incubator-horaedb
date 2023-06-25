@@ -2946,6 +2946,7 @@ dependencies = [
  "async-trait",
  "catalog",
  "catalog_impls",
+ "ceresdbproto 1.0.4 (git+https://github.com/chunshao90/ceresdbproto.git?rev=8689dcdbbb08647d4f82c1f6caa4a8310e74257c)",
  "common_types",
  "common_util",
  "datafusion",

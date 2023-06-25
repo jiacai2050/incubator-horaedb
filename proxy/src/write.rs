@@ -981,9 +981,12 @@ fn write_entry_to_columns(
                         "Tag({tag_name}) value type is not supported, table_name:{table_name}"
                     ),
                 })?;
-            let mut column = Column::new(row_count, column_schema.data_type);
 
             validate_data_type(table_name, tag_name, &tag_value, column_schema.data_type)?;
+
+            let column = columns
+                .entry(tag_name.to_string())
+                .or_insert_with(|| Column::new(row_count, column_schema.data_type));
 
             for _ in 0..write_series_entry.field_groups.len() {
                 column
@@ -994,7 +997,6 @@ fn write_entry_to_columns(
                         msg: format!("Append tag value",),
                     })?;
             }
-            columns.insert(tag_name.to_string(), column);
         }
 
         // Fill fields.
