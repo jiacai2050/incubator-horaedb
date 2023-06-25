@@ -364,6 +364,7 @@ impl<'a> MemTableWriter<'a> {
         sequence: SequenceNumber,
         mut columns: HashMap<String, Column>,
     ) -> Result<()> {
+        return Ok(());
         let _timer = self.table_data.metrics.start_table_write_memtable_timer();
         if columns.is_empty() {
             return Ok(());

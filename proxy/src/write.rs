@@ -983,10 +983,16 @@ fn write_entry_to_columns(
                 })?;
 
             validate_data_type(table_name, tag_name, &tag_value, column_schema.data_type)?;
-
-            let column = columns
-                .entry(tag_name.to_string())
-                .or_insert_with(|| Column::new(row_count, column_schema.data_type));
+            let column = if let Some(column) = columns.get_mut(tag_name) {
+                column
+            } else {
+                let mut column = Column::new(row_count, column_schema.data_type);
+                columns.insert(tag_name.to_string(), column);
+                columns.get_mut(tag_name).unwrap()
+            };
+            // let column = columns
+            //     .entry(tag_name.to_string())
+            //     .or_insert_with(|| Column::new(row_count, column_schema.data_type));
 
             for _ in 0..write_series_entry.field_groups.len() {
                 column
@@ -1003,9 +1009,16 @@ fn write_entry_to_columns(
         let mut field_name_index: HashMap<String, usize> = HashMap::new();
         for (i, field_group) in write_series_entry.field_groups.into_iter().enumerate() {
             // timestamp
-            let mut timestamp_column = columns
-                .entry(schema.timestamp_name().to_string())
-                .or_insert_with(|| Column::new(row_count, DatumKind::Timestamp));
+            // let mut timestamp_column = columns
+            //     .entry(schema.timestamp_name().to_string())
+            //     .or_insert_with(|| Column::new(row_count, DatumKind::Timestamp));
+            let timestamp_column = if let Some(column) = columns.get_mut(schema.timestamp_name()) {
+                column
+            } else {
+                let mut column = Column::new(row_count, DatumKind::Timestamp);
+                columns.insert(schema.timestamp_name().to_string(), column);
+                columns.get_mut(schema.timestamp_name()).unwrap()
+            };
             timestamp_column
                 .append(value::Value::TimestampValue(field_group.timestamp))
                 .expect("Can't panic");
@@ -1049,9 +1062,16 @@ fn write_entry_to_columns(
                                 "Field({field_name}) value type is not supported, table:{table_name}"
                             ),
                         })?;
-                    let mut builder = columns
-                        .entry(field_name.to_string())
-                        .or_insert_with(|| Column::new(row_count, column_schema.data_type));
+                    // let mut builder = columns
+                    //     .entry(field_name.to_string())
+                    //     .or_insert_with(|| Column::new(row_count, column_schema.data_type));
+                    let column = if let Some(column) = columns.get_mut(field_name) {
+                        column
+                    } else {
+                        let mut column = Column::new(row_count, column_schema.data_type);
+                        columns.insert(field_name.to_string(), column);
+                        columns.get_mut(field_name).unwrap()
+                    };
                     validate_data_type(
                         table_name,
                         field_name,
@@ -1059,13 +1079,10 @@ fn write_entry_to_columns(
                         column_schema.data_type,
                     )?;
 
-                    builder
-                        .append(field_value)
-                        .box_err()
-                        .context(ErrWithCause {
-                            code: StatusCode::BAD_REQUEST,
-                            msg: format!("Append tag value",),
-                        })?;
+                    column.append(field_value).box_err().context(ErrWithCause {
+                        code: StatusCode::BAD_REQUEST,
+                        msg: format!("Append tag value",),
+                    })?;
                 }
             }
         }
