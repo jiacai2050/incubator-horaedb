@@ -220,9 +220,18 @@ fn merge_pending_write_requests(
     for req in pending_writes {
         if let Some(v) = req.columns {
             for (name, col) in v {
-                let column = columns.entry(name).or_insert_with(|| {
-                    common_types::column::Column::new(num_pending_rows, col.datum_kind())
-                });
+                // let column = columns.entry(name).or_insert_with(|| {
+                //     common_types::column::Column::new(num_pending_rows, col.datum_kind())
+                // });
+
+                let column = if let Some(column) = columns.get_mut(&name) {
+                    column
+                } else {
+                    let mut column =
+                        common_types::column::Column::new(num_pending_rows, col.datum_kind());
+                    columns.insert(name.clone(), column);
+                    columns.get_mut(&name).unwrap()
+                };
 
                 for c in col.into_iter() {
                     column.append(c).expect("append column failed");

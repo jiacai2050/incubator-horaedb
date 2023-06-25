@@ -603,7 +603,7 @@ impl<'a> Writer<'a> {
         table_data: &TableDataRef,
         columns: HashMap<String, Column>,
     ) -> Result<()> {
-        let sequence = self.write_columns_to_wal(&columns).await?;
+        let sequence = self.write_columns_to_wal(columns.clone()).await?;
         let memtable_writer = MemTableWriter::new(table_data.clone(), self.serial_exec);
 
         memtable_writer
@@ -761,10 +761,10 @@ impl<'a> Writer<'a> {
 
     async fn write_columns_to_wal(
         &self,
-        columns: &HashMap<String, Column>,
+        columns: HashMap<String, Column>,
     ) -> Result<SequenceNumber> {
         let mut len = 0;
-        for (k, v) in columns {
+        for (k, v) in &columns {
             len = v.len();
             break;
         }
@@ -777,9 +777,9 @@ impl<'a> Writer<'a> {
             let mut pbColumn = ColumnPB {
                 data: Vec::with_capacity(len),
             };
-            for i in 0..v.len() {
+            for col in v{
                 pbColumn.data.push(Value {
-                    value: Some(v.get_value(i)),
+                    value: Some(col),
                 });
             }
 
