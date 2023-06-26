@@ -603,7 +603,8 @@ impl<'a> Writer<'a> {
         table_data: &TableDataRef,
         columns: HashMap<String, Column>,
     ) -> Result<()> {
-        let sequence = self.write_columns_to_wal(columns.clone()).await?;
+        let sequence = self.write_columns_to_wal(columns).await?;
+        return Ok(());
         let memtable_writer = MemTableWriter::new(table_data.clone(), self.serial_exec);
 
         memtable_writer
@@ -763,11 +764,7 @@ impl<'a> Writer<'a> {
         &self,
         columns: HashMap<String, Column>,
     ) -> Result<SequenceNumber> {
-        let mut len = 0;
-        for (k, v) in &columns {
-            len = v.len();
-            break;
-        }
+
         let _timer = self.table_data.metrics.start_table_write_wal_timer();
         // Convert into pb
         let mut pbColumnData = ColumnDataPB {
@@ -775,15 +772,13 @@ impl<'a> Writer<'a> {
         };
         for (k, v) in columns {
             let mut pbColumn = ColumnPB {
-                data: Vec::with_capacity(len),
+                data: Vec::with_capacity(v.len()),
             };
-            for col in v{
-                pbColumn.data.push(Value {
-                    value: Some(col),
-                });
+            for col in v {
+                pbColumn.data.push(Value { value: Some(col) });
             }
 
-            pbColumnData.data.insert(k.clone(), pbColumn);
+            pbColumnData.data.insert(k, pbColumn);
         }
         let write_req_pb = table_requests::WriteRequest {
             // FIXME: Shall we avoid the magic number here?

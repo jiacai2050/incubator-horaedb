@@ -990,15 +990,12 @@ fn write_entry_to_columns(
                 columns.insert(tag_name.to_string(), column);
                 columns.get_mut(tag_name).unwrap()
             };
-            // let column = columns
-            //     .entry(tag_name.to_string())
-            //     .or_insert_with(|| Column::new(row_count, column_schema.data_type));
 
             for _ in 0..write_series_entry.field_groups.len() {
                 column
                     .append(tag_value.clone())
                     .box_err()
-                    .context(ErrWithCause {
+                    .with_context(|| ErrWithCause {
                         code: StatusCode::BAD_REQUEST,
                         msg: format!("Append tag value",),
                     })?;
@@ -1079,10 +1076,13 @@ fn write_entry_to_columns(
                         column_schema.data_type,
                     )?;
 
-                    column.append(field_value).box_err().context(ErrWithCause {
-                        code: StatusCode::BAD_REQUEST,
-                        msg: format!("Append tag value",),
-                    })?;
+                    column
+                        .append(field_value)
+                        .box_err()
+                        .with_context(|| ErrWithCause {
+                            code: StatusCode::BAD_REQUEST,
+                            msg: format!("Append tag value",),
+                        })?;
                 }
             }
         }
