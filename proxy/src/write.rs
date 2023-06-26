@@ -990,10 +990,16 @@ fn write_entry_to_columns(
                 columns.insert(tag_name.to_string(), column);
                 columns.get_mut(tag_name).unwrap()
             };
-
+            let datum = convert_proto_value_to_datum(
+                table_name,
+                tag_name,
+                tag_value,
+                column_schema.data_type,
+            )
+            .unwrap();
             for _ in 0..write_series_entry.field_groups.len() {
                 column
-                    .append(tag_value.clone())
+                    .append_datum(datum.clone())
                     .box_err()
                     .with_context(|| ErrWithCause {
                         code: StatusCode::BAD_REQUEST,

@@ -764,7 +764,6 @@ impl<'a> Writer<'a> {
         &self,
         columns: HashMap<String, Column>,
     ) -> Result<SequenceNumber> {
-
         let _timer = self.table_data.metrics.start_table_write_wal_timer();
         // Convert into pb
         let mut pbColumnData = ColumnDataPB {
