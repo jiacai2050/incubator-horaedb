@@ -196,6 +196,33 @@ impl Column {
         }
     }
 
+    pub fn append_column(&mut self, mut column: Column) {
+        assert_eq!(self.datum_kind, column.datum_kind);
+        self.valid.append_set(column.len());
+        match (&mut self.data, &mut column.data) {
+            (ColumnData::F64(data), ColumnData::F64(ref mut column_data)) => {
+                data.append(column_data)
+            }
+            (ColumnData::I64(data), ColumnData::I64(ref mut column_data)) => {
+                data.append(column_data)
+            }
+            (ColumnData::U64(data), ColumnData::U64(ref mut column_data)) => {
+                data.append(column_data)
+            }
+            (ColumnData::String(data), ColumnData::String(ref mut column_data)) => {
+                data.append(column_data)
+            }
+            (ColumnData::StringBytes(data), ColumnData::StringBytes(ref mut column_data)) => {
+                data.append(column_data)
+            }
+            (ColumnData::Varbinary(data), ColumnData::Varbinary(ref mut column_data)) => {
+                data.append(column_data)
+            }
+            (ColumnData::Bool(data), ColumnData::Bool(ref mut column_data)) => todo!(),
+            _ => todo!(),
+        }
+    }
+
     pub fn append(&mut self, value: value::Value) -> Result<()> {
         match (&mut self.data, value) {
             (ColumnData::F64(data), value::Value::Float64Value(v)) => data[self.to_insert] = v,

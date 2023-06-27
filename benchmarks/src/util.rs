@@ -1,4 +1,4 @@
-// Copyright 2022 CeresDB Project Authors. Licensed under Apache-2.0.
+// Copyright 2022-2023 CeresDB Project Authors. Licensed under Apache-2.0.
 
 //! Utilities.
 
@@ -94,60 +94,61 @@ pub fn projected_schema_by_number(
     }
 }
 
-pub async fn load_sst_to_memtable(
-    store: &ObjectStoreRef,
-    sst_path: &Path,
-    schema: &Schema,
-    memtable: &MemTableRef,
-    runtime: Arc<Runtime>,
-) {
-    let scan_options = ScanOptions {
-        background_read_parallelism: 1,
-        max_record_batches_in_flight: 1024,
-    };
-    let sst_read_options = SstReadOptions {
-        reverse: false,
-        frequency: ReadFrequency::Frequent,
-        num_rows_per_row_group: 8192,
-        projected_schema: ProjectedSchema::no_projection(schema.clone()),
-        predicate: Arc::new(Predicate::empty()),
-        meta_cache: None,
-        scan_options,
-        runtime,
-    };
-    let sst_factory = FactoryImpl;
-    let store_picker: ObjectStorePickerRef = Arc::new(store.clone());
-    let mut sst_reader = sst_factory
-        .create_reader(
-            sst_path,
-            &sst_read_options,
-            SstReadHint::default(),
-            &store_picker,
-            None,
-        )
-        .await
-        .unwrap();
-
-    let mut sst_stream = sst_reader.read().await.unwrap();
-    let index_in_writer = IndexInWriterSchema::for_same_schema(schema.num_columns());
-    let mut ctx = PutContext::new(index_in_writer);
-
-    let mut sequence = crate::INIT_SEQUENCE;
-
-    while let Some(batch) = sst_stream.next().await {
-        let batch = batch.unwrap();
-
-        for i in 0..batch.num_rows() {
-            let row = batch.clone_row_at(i);
-
-            let key_seq = KeySequence::new(sequence, i as u32);
-
-            memtable.put(&mut ctx, key_seq, &row, schema).unwrap();
-
-            sequence += 1;
-        }
-    }
-}
+// pub async fn load_sst_to_memtable(
+//     store: &ObjectStoreRef,
+//     sst_path: &Path,
+//     schema: &Schema,
+//     memtable: &MemTableRef,
+//     runtime: Arc<Runtime>,
+// ) {
+//     let scan_options = ScanOptions {
+//         background_read_parallelism: 1,
+//         max_record_batches_in_flight: 1024,
+//     };
+//     let sst_read_options = SstReadOptions {
+//         reverse: false,
+//         frequency: ReadFrequency::Frequent,
+//         num_rows_per_row_group: 8192,
+//         projected_schema: ProjectedSchema::no_projection(schema.clone()),
+//         predicate: Arc::new(Predicate::empty()),
+//         meta_cache: None,
+//         scan_options,
+//         runtime,
+//     };
+//     let sst_factory = FactoryImpl;
+//     let store_picker: ObjectStorePickerRef = Arc::new(store.clone());
+//     let mut sst_reader = sst_factory
+//         .create_reader(
+//             sst_path,
+//             &sst_read_options,
+//             SstReadHint::default(),
+//             &store_picker,
+//             None,
+//         )
+//         .await
+//         .unwrap();
+//
+//     let mut sst_stream = sst_reader.read().await.unwrap();
+//     let index_in_writer =
+// IndexInWriterSchema::for_same_schema(schema.num_columns());     let mut ctx =
+// PutContext::new(index_in_writer);
+//
+//     let mut sequence = crate::INIT_SEQUENCE;
+//
+//     while let Some(batch) = sst_stream.next().await {
+//         let batch = batch.unwrap();
+//
+//         for i in 0..batch.num_rows() {
+//             let row = batch.clone_row_at(i);
+//
+//             let key_seq = KeySequence::new(sequence, i as u32);
+//
+//             memtable.put(&mut ctx, key_seq, &row, schema).unwrap();
+//
+//             sequence += 1;
+//         }
+//     }
+// }
 
 pub async fn file_handles_from_ssts(
     store: &ObjectStoreRef,

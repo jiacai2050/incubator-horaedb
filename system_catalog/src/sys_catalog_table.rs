@@ -304,6 +304,7 @@ impl SysCatalogTable {
             table_engine::OPTION_KEY_ENABLE_TTL.to_string(),
             DEFAULT_ENABLE_TTL.to_string(),
         );
+        options.insert("segment_duration".to_string(), "2h".to_string());
         let create_request = CreateTableRequest {
             catalog_name: consts::SYSTEM_CATALOG.to_string(),
             schema_name: consts::SYSTEM_CATALOG_SCHEMA.to_string(),

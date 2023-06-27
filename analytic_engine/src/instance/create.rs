@@ -3,7 +3,7 @@
 //! Create table logic of instance
 
 use common_util::error::BoxError;
-use log::info;
+use log::{error, info};
 use snafu::{OptionExt, ResultExt};
 use table_engine::engine::CreateTableRequest;
 
@@ -44,7 +44,6 @@ impl Instance {
                 })?;
         // Sanitize options before creating table.
         table_opts.sanitize();
-
         if let Some(table_data) = space.find_table_by_id(request.table_id) {
             return Ok(table_data);
         }
