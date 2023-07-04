@@ -188,11 +188,10 @@ impl PartitionRule for KeyRule {
         let mut ret = Vec::with_capacity(row_count);
         let mut buf = BytesMut::new();
         for i in 0..row_count {
-            let mut columns_vec = Vec::with_capacity(self.typed_key_columns.len());
             for column in &column_vec {
-                columns_vec.push(column.get_datum(i));
+                column.get_bytes(i, &mut buf);
             }
-            ret.push(self.compute_partition_for_inserted_columns(&columns_vec, &mut buf));
+            ret.push((hash64(&mut buf) % (self.partition_num as u64)) as usize);
         }
         Ok(ret)
     }

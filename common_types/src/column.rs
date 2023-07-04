@@ -15,7 +15,7 @@ use arrow::{
     datatypes::DataType,
     error::ArrowError,
 };
-use bytes_ext::Bytes;
+use bytes_ext::{BufMut, Bytes, BytesMut};
 use ceresdbproto::storage::value;
 use datafusion::parquet::data_type::AsBytes;
 use snafu::{ResultExt, Snafu};
@@ -296,6 +296,18 @@ impl Column {
             ColumnData::StringBytes(ref data) => value::Value::StringValue(data[idx].to_string()),
             ColumnData::Varbinary(ref data) => value::Value::VarbinaryValue(data[idx].clone()),
             ColumnData::Bool(ref data) => value::Value::BoolValue(data.get(idx)),
+        }
+    }
+
+    pub fn get_bytes(&self, idx: usize, buf: &mut BytesMut) {
+        match self.data {
+            ColumnData::F64(ref data) => buf.put_slice(data[idx].to_le_bytes().as_slice()),
+            ColumnData::I64(ref data) => buf.put_slice(data[idx].to_le_bytes().as_slice()),
+            ColumnData::U64(ref data) => buf.put_slice(data[idx].to_le_bytes().as_slice()),
+            ColumnData::String(ref data) => buf.put_slice(data[idx].as_bytes()),
+            ColumnData::StringBytes(ref data) => buf.put_slice(data[idx].as_bytes()),
+            ColumnData::Varbinary(ref data) => buf.put_slice(data[idx].as_slice()),
+            ColumnData::Bool(ref data) => todo!(),
         }
     }
 
