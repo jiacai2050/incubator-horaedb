@@ -1,11 +1,13 @@
-// Copyright 2022 CeresDB Project Authors. Licensed under Apache-2.0.
+// Copyright 2022-2023 CeresDB Project Authors. Licensed under Apache-2.0.
 
 //! Key partition rule
 
 use std::collections::{HashMap, HashSet};
 
+use ceresdbproto::storage::value::Value;
 use common_types::{
     bytes::{BufMut, BytesMut},
+    column::Column,
     datum::Datum,
     hash::hash64,
     row::{Row, RowGroup},
@@ -110,6 +112,14 @@ impl KeyRule {
         compute_partition(&partition_keys, self.partition_num, buf)
     }
 
+    fn compute_partition_for_inserted_columns(
+        &self,
+        partition_keys: &[Datum],
+        buf: &mut BytesMut,
+    ) -> usize {
+        compute_partition_columns(&partition_keys, self.partition_num, buf)
+    }
+
     fn compute_partition_for_keys_group(
         &self,
         group: &[usize],
@@ -161,6 +171,30 @@ impl PartitionRule for KeyRule {
             .map(|row| self.compute_partition_for_inserted_row(row, &typed_idxs, &mut buf))
             .collect();
         Ok(partitions)
+    }
+
+    fn locate_partitions_for_write_columns(
+        &self,
+        columns: &HashMap<String, Column>,
+    ) -> Result<Vec<usize>> {
+        let mut column_vec = Vec::with_capacity(self.typed_key_columns.len());
+
+        for typed_col in &self.typed_key_columns {
+            let column = columns.get(&typed_col.column).unwrap();
+            column_vec.push(column);
+        }
+
+        let row_count = column_vec[0].len();
+        let mut ret = Vec::with_capacity(row_count);
+        let mut buf = BytesMut::new();
+        for i in 0..row_count {
+            let mut columns_vec = Vec::with_capacity(self.typed_key_columns.len());
+            for column in &column_vec {
+                columns_vec.push(column.get_datum(i));
+            }
+            ret.push(self.compute_partition_for_inserted_columns(&columns_vec, &mut buf));
+        }
+        Ok(ret)
     }
 
     fn locate_partitions_for_read(&self, filters: &[PartitionFilter]) -> Result<Vec<usize>> {
@@ -241,6 +275,20 @@ fn expand_partition_keys_group(
 // Compute partition
 pub(crate) fn compute_partition(
     partition_keys: &[&Datum],
+    partition_num: usize,
+    buf: &mut BytesMut,
+) -> usize {
+    buf.clear();
+    partition_keys
+        .iter()
+        .for_each(|datum| buf.put_slice(&datum.to_bytes()));
+
+    (hash64(buf) % (partition_num as u64)) as usize
+}
+
+// Compute partition
+pub(crate) fn compute_partition_columns(
+    partition_keys: &[Datum],
     partition_num: usize,
     buf: &mut BytesMut,
 ) -> usize {

@@ -6,6 +6,7 @@ use std::{collections::HashMap, fmt};
 
 use async_trait::async_trait;
 use common_types::{
+    column::Column,
     row::{Row, RowGroupBuilder},
     schema::Schema,
 };
@@ -136,36 +137,58 @@ impl Table for PartitionTableImpl {
                 .with_label_values(&["locate"])
                 .start_timer();
             df_partition_rule
-                .locate_partitions_for_write(&request.row_group)
+                .locate_partitions_for_write_columns(&request.columns)
                 .box_err()
                 .context(LocatePartitions)?
         };
 
-        let mut split_rows = HashMap::new();
+        let mut split_rows: HashMap<usize, HashMap<String, Column>> = HashMap::new();
         let schema = request.row_group.schema().clone();
-        for (partition, row) in partitions.into_iter().zip(request.row_group.into_iter()) {
-            split_rows
-                .entry(partition)
-                .or_insert_with(Vec::new)
-                .push(row);
+        // for (partition, row) in
+        // partitions.into_iter().zip(request.row_group.into_iter()) {
+        //     split_rows
+        //         .entry(partition)
+        //         .or_insert_with(Vec::new)
+        //         .push(row);
+        // }
+
+        let row_count = request.num_rows();
+
+        for (k, v) in request.columns.unwrap() {
+            let datum_kind = v.datum_kind();
+            for (idx, col) in v.into_iter().enumerate() {
+                let partition = partitions[idx];
+                let columns = split_rows
+                    .entry(partition)
+                    .or_insert_with(|| HashMap::with_capacity(schema.num_columns()));
+                let column = if let Some(column) = columns.get_mut(&k) {
+                    column
+                } else {
+                    let mut column = Column::new(row_count, datum_kind);
+                    columns.insert(k.to_string(), column);
+                    columns.get_mut(&k).unwrap()
+                };
+                column.append(col).unwrap();
+            }
         }
 
         // Insert split write request through remote engine.
         let mut request_batch = Vec::with_capacity(split_rows.len());
-        for (partition, rows) in split_rows {
+        for (partition, columns) in split_rows {
             let sub_table_ident = self.get_sub_table_ident(partition);
-            let row_group = RowGroupBuilder::with_rows(schema.clone(), rows)
-                .box_err()
-                .with_context(|| Write {
-                    table: sub_table_ident.table.clone(),
-                })?
-                .build();
+            // let row_group = RowGroupBuilder::with_rows(schema.clone(), rows)
+            //     .box_err()
+            //     .with_context(|| Write {
+            //         table: sub_table_ident.table.clone(),
+            //     })?
+            //     .build();
+            let row_group = RowGroupBuilder::new(schema.clone()).build();
 
             let request = RemoteWriteRequest {
                 table: sub_table_ident,
                 write_request: WriteRequest {
                     row_group,
-                    columns: None,
+                    columns: Some(columns),
                 },
             };
             request_batch.push(request);

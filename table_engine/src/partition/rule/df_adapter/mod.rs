@@ -2,7 +2,9 @@
 
 //! Partition rule datafusion adapter
 
-use common_types::{row::RowGroup, schema::Schema};
+use std::collections::HashMap;
+
+use common_types::{column::Column, row::RowGroup, schema::Schema};
 use datafusion::logical_expr::Expr;
 
 use self::extractor::KeyExtractor;
@@ -38,6 +40,16 @@ impl DfPartitionRuleAdapter {
 
     pub fn locate_partitions_for_write(&self, row_group: &RowGroup) -> Result<Vec<usize>> {
         self.rule.locate_partitions_for_write(row_group)
+    }
+
+    pub fn locate_partitions_for_write_columns(
+        &self,
+        columns: &Option<HashMap<String, Column>>,
+    ) -> Result<Vec<usize>> {
+        if let Some(columns) = columns {
+            return self.rule.locate_partitions_for_write_columns(columns);
+        }
+        todo!();
     }
 
     pub fn locate_partitions_for_read(&self, filters: &[Expr]) -> Result<Vec<usize>> {

@@ -11,11 +11,16 @@ use arrow_ext::{
 use ceresdbproto::{
     remote_engine,
     remote_engine::row_group::Rows::Arrow,
-    storage::{arrow_payload, ArrowPayload},
+    storage::{arrow_payload, value, ArrowPayload, Value},
+    table_requests::{Column as ColumnPB, ColumnData as ColumnDataPB},
 };
 use common_types::{
+    column::Column,
+    column_schema,
+    datum::DatumKind,
     record_batch::{RecordBatch, RecordBatchWithKeyBuilder},
     row::{RowGroup, RowGroupBuilder},
+    schema,
     schema::Schema,
 };
 use common_util::error::{BoxError, GenericError, GenericResult};
@@ -184,37 +189,114 @@ impl TryFrom<ceresdbproto::remote_engine::WriteRequest> for WriteRequest {
         pb: ceresdbproto::remote_engine::WriteRequest,
     ) -> std::result::Result<Self, Self::Error> {
         let table_identifier = pb.table.context(EmptyTableIdentifier)?;
-        let row_group_pb = pb.row_group.context(EmptyRowGroup)?;
-        let rows = row_group_pb.rows.context(EmptyRowGroup)?;
-        let row_group = match rows {
-            Arrow(v) => {
-                ensure!(!v.record_batches.is_empty(), EmptyRecordBatch);
+        // let row_group_pb = pb.row_group.context(EmptyRowGroup)?;
+        // let rows = row_group_pb.rows.context(EmptyRowGroup)?;
+        // let row_group = match rows {
+        //     Arrow(v) => {
+        //         ensure!(!v.record_batches.is_empty(), EmptyRecordBatch);
+        //
+        //         let compression = match v.compression() {
+        //             arrow_payload::Compression::None => CompressionMethod::None,
+        //             arrow_payload::Compression::Zstd => CompressionMethod::Zstd,
+        //         };
+        //
+        //         let mut record_batch_vec = vec![];
+        //         for data in v.record_batches {
+        //             let mut arrow_record_batch_vec = ipc::decode_record_batches(data,
+        // compression)                 .map_err(|e| Box::new(e) as _)
+        //                 .context(ConvertRowGroup)?;
+        //             record_batch_vec.append(&mut arrow_record_batch_vec);
+        //         }
+        //
+        //         build_row_group_from_record_batch(record_batch_vec)?
+        //     }
+        // };
 
-                let compression = match v.compression() {
-                    arrow_payload::Compression::None => CompressionMethod::None,
-                    arrow_payload::Compression::Zstd => CompressionMethod::Zstd,
-                };
-
-                let mut record_batch_vec = vec![];
-                for data in v.record_batches {
-                    let mut arrow_record_batch_vec = ipc::decode_record_batches(data, compression)
-                        .map_err(|e| Box::new(e) as _)
-                        .context(ConvertRowGroup)?;
-                    record_batch_vec.append(&mut arrow_record_batch_vec);
-                }
-
-                build_row_group_from_record_batch(record_batch_vec)?
+        let mut column_data_pb = pb.column_data.unwrap();
+        let mut columns = HashMap::with_capacity(column_data_pb.data.len());
+        for (k, v) in column_data_pb.data {
+            let datum_kind = match v.data[0].value.as_ref().unwrap() {
+                value::Value::BoolValue(_) => DatumKind::Boolean,
+                value::Value::Int32Value(_) => DatumKind::Int32,
+                value::Value::Int64Value(_) => DatumKind::Int64,
+                value::Value::Float32Value(_) => DatumKind::Float,
+                value::Value::Float64Value(_) => DatumKind::Double,
+                value::Value::StringValue(_) => DatumKind::String,
+                value::Value::VarbinaryValue(_) => DatumKind::Varbinary,
+                value::Value::TimestampValue(_) => DatumKind::Timestamp,
+                _ => todo!(),
+            };
+            let mut column = Column::new(v.data.len(), datum_kind);
+            for val in v.data {
+                let val = val.value.unwrap();
+                column.append(val).unwrap();
             }
-        };
+            columns.insert(k, column);
+        }
 
         Ok(Self {
             table: table_identifier.into(),
             write_request: TableWriteRequest {
-                row_group,
-                columns: None,
+                row_group: RowGroupBuilder::new(tables_schema()).build(),
+                columns: Some(columns),
             },
         })
     }
+}
+
+fn tables_schema() -> Schema {
+    schema::Builder::with_capacity(6)
+        .auto_increment_column_id(true)
+        .add_key_column(
+            column_schema::Builder::new("timestamp".to_string(), DatumKind::Timestamp)
+                .is_nullable(false)
+                .is_tag(false)
+                .build()
+                .unwrap(),
+        )
+        .unwrap()
+        .add_key_column(
+            column_schema::Builder::new("catalog".to_string(), DatumKind::String)
+                .is_nullable(false)
+                .is_tag(false)
+                .build()
+                .unwrap(),
+        )
+        .unwrap()
+        .add_key_column(
+            column_schema::Builder::new("schema".to_string(), DatumKind::String)
+                .is_nullable(false)
+                .is_tag(false)
+                .build()
+                .unwrap(),
+        )
+        .unwrap()
+        .add_key_column(
+            column_schema::Builder::new("table_name".to_string(), DatumKind::String)
+                .is_nullable(false)
+                .is_tag(false)
+                .build()
+                .unwrap(),
+        )
+        .unwrap()
+        .add_normal_column(
+            column_schema::Builder::new("table_id".to_string(), DatumKind::UInt64)
+                .is_nullable(false)
+                .is_tag(false)
+                .build()
+                .unwrap(),
+        )
+        .unwrap()
+        .add_normal_column(
+            column_schema::Builder::new("engine".to_string(), DatumKind::String)
+                .is_nullable(false)
+                .is_tag(false)
+                .build()
+                .unwrap(),
+        )
+        .unwrap()
+        .build()
+        .unwrap()
 }
 
 impl WriteRequest {
@@ -223,50 +305,68 @@ impl WriteRequest {
         compress_options: CompressOptions,
     ) -> std::result::Result<ceresdbproto::remote_engine::WriteRequest, Error> {
         // Row group to pb.
-        let row_group = request.write_request.row_group;
-        let table_schema = row_group.schema();
-        let min_timestamp = row_group.min_timestamp().as_i64();
-        let max_timestamp = row_group.max_timestamp().as_i64();
-
-        let mut builder = RecordBatchWithKeyBuilder::new(table_schema.to_record_schema_with_key());
-
-        for row in row_group {
-            builder
-                .append_row(row)
-                .map_err(|e| Box::new(e) as _)
-                .context(ConvertRowGroup)?;
-        }
-
-        let record_batch_with_key = builder
-            .build()
-            .map_err(|e| Box::new(e) as _)
-            .context(ConvertRowGroup)?;
-        let record_batch = record_batch_with_key.into_record_batch();
-        let compress_output =
-            ipc::encode_record_batch(&record_batch.into_arrow_record_batch(), compress_options)
-                .map_err(|e| Box::new(e) as _)
-                .context(ConvertRowGroup)?;
-
-        let compression = match compress_output.method {
-            CompressionMethod::None => arrow_payload::Compression::None,
-            CompressionMethod::Zstd => arrow_payload::Compression::Zstd,
-        };
-
-        let row_group_pb = ceresdbproto::remote_engine::RowGroup {
-            min_timestamp,
-            max_timestamp,
-            rows: Some(Arrow(ArrowPayload {
-                record_batches: vec![compress_output.payload],
-                compression: compression as i32,
-            })),
-        };
+        // let row_group = request.write_request.row_group;
+        // let table_schema = row_group.schema();
+        // let min_timestamp = row_group.min_timestamp().as_i64();
+        // let max_timestamp = row_group.max_timestamp().as_i64();
+        //
+        // let mut builder =
+        // RecordBatchWithKeyBuilder::new(table_schema.to_record_schema_with_key());
+        //
+        // for row in row_group {
+        //     builder
+        //         .append_row(row)
+        //         .map_err(|e| Box::new(e) as _)
+        //         .context(ConvertRowGroup)?;
+        // }
+        //
+        // let record_batch_with_key = builder
+        //     .build()
+        //     .map_err(|e| Box::new(e) as _)
+        //     .context(ConvertRowGroup)?;
+        // let record_batch = record_batch_with_key.into_record_batch();
+        // let compress_output =
+        //     ipc::encode_record_batch(&record_batch.into_arrow_record_batch(),
+        // compress_options)         .map_err(|e| Box::new(e) as _)
+        //         .context(ConvertRowGroup)?;
+        //
+        // let compression = match compress_output.method {
+        //     CompressionMethod::None => arrow_payload::Compression::None,
+        //     CompressionMethod::Zstd => arrow_payload::Compression::Zstd,
+        // };
+        //
+        // let row_group_pb = ceresdbproto::remote_engine::RowGroup {
+        //     min_timestamp,
+        //     max_timestamp,
+        //     rows: Some(Arrow(ArrowPayload {
+        //         record_batches: vec![compress_output.payload],
+        //         compression: compression as i32,
+        //     })),
+        // };
 
         // Table ident to pb.
         let table_pb = request.table.into();
 
+        let columns = request.write_request.columns.unwrap();
+
+        let mut pbColumnData = ColumnDataPB {
+            data: HashMap::with_capacity(columns.len()),
+        };
+        for (k, v) in columns {
+            let mut pbColumn = ColumnPB {
+                data: Vec::with_capacity(v.len()),
+            };
+            for col in v {
+                pbColumn.data.push(Value { value: Some(col) });
+            }
+
+            pbColumnData.data.insert(k, pbColumn);
+        }
+
         Ok(ceresdbproto::remote_engine::WriteRequest {
             table: Some(table_pb),
-            row_group: Some(row_group_pb),
+            row_group: None,
+            column_data: Some(pbColumnData),
         })
     }
 }

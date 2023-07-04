@@ -7,7 +7,9 @@ mod factory;
 mod filter;
 mod key;
 
-use common_types::{datum::DatumKind, row::RowGroup};
+use std::collections::HashMap;
+
+use common_types::{column::Column, datum::DatumKind, row::RowGroup};
 
 use self::filter::PartitionFilter;
 use crate::partition::Result;
@@ -20,6 +22,11 @@ pub trait PartitionRule: Send + Sync + 'static {
     ///
     /// Len of returned value should be equal to the one of rows in `row group`.
     fn locate_partitions_for_write(&self, row_group: &RowGroup) -> Result<Vec<usize>>;
+
+    fn locate_partitions_for_write_columns(
+        &self,
+        row_group: &HashMap<String, Column>,
+    ) -> Result<Vec<usize>>;
 
     /// Locate partitions according to `filters`.
     ///
