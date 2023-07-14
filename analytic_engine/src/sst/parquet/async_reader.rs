@@ -358,17 +358,18 @@ impl<'a> Reader<'a> {
                     file_path: self.path.to_string(),
                 })?;
 
-        let object_store_reader = parquet_ext::reader::ObjectStoreReader::new(
-            self.store.clone(),
-            self.path.clone(),
-            Arc::new(parquet_meta_data),
-        );
+        // let object_store_reader = parquet_ext::reader::ObjectStoreReader::new(
+        //     self.store.clone(),
+        //     self.path.clone(),
+        //     Arc::new(parquet_meta_data),
+        // );
 
-        let parquet_meta_data = parquet_ext::meta_data::meta_with_page_indexes(object_store_reader)
-            .await
-            .with_context(|| DecodePageIndexes {
-                file_path: self.path.to_string(),
-            })?;
+        // let parquet_meta_data =
+        // parquet_ext::meta_data::meta_with_page_indexes(object_store_reader)
+        //     .await
+        //     .with_context(|| DecodePageIndexes {
+        //         file_path: self.path.to_string(),
+        //     })?;
 
         MetaData::try_new(&parquet_meta_data, ignore_sst_filter)
             .box_err()
