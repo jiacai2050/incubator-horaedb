@@ -363,7 +363,6 @@ impl<'a> Reader<'a> {
         //     self.path.clone(),
         //     Arc::new(parquet_meta_data),
         // );
-
         // let parquet_meta_data =
         // parquet_ext::meta_data::meta_with_page_indexes(object_store_reader)
         //     .await
