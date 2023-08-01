@@ -2,11 +2,21 @@
 
 //! Query context
 
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Instant,
+};
 
 use common_types::request_id::RequestId;
 use datafusion::{
-    execution::{context::SessionState, runtime_env::RuntimeEnv},
+    execution::{
+        context::SessionState,
+        memory_pool::{MemoryPool, MemoryReservation},
+        runtime_env::RuntimeEnv,
+    },
     optimizer::{
         analyzer::{
             count_wildcard_rule::CountWildcardRule, inline_table_scan::InlineTableScan,
@@ -33,6 +43,35 @@ use crate::{
 
 pub type ContextRef = Arc<Context>;
 
+#[derive(Debug)]
+struct TrackingMemoryPool {
+    allocs: Arc<AtomicUsize>,
+}
+
+impl MemoryPool for TrackingMemoryPool {
+    fn grow(&self, _reservation: &MemoryReservation, additional: usize) {
+        self.allocs.fetch_add(additional, Ordering::Relaxed);
+    }
+
+    fn shrink(&self, _reservation: &MemoryReservation, _shrink: usize) {
+        // We don't shrink used memory here, otherwise we don't know
+        // how many memory is alloc for this query.
+    }
+
+    fn try_grow(
+        &self,
+        reservation: &MemoryReservation,
+        additional: usize,
+    ) -> datafusion::common::Result<()> {
+        self.grow(reservation, additional);
+        Ok(())
+    }
+
+    fn reserved(&self) -> usize {
+        self.allocs.load(Ordering::Relaxed)
+    }
+}
+
 /// Query context
 pub struct Context {
     pub request_id: RequestId,
@@ -47,6 +86,7 @@ impl Context {
         config: &Config,
         request_id: RequestId,
         deadline: Option<Instant>,
+        allocs: Arc<AtomicUsize>,
     ) -> SessionContext {
         let timeout =
             deadline.map(|deadline| deadline.duration_since(Instant::now()).as_millis() as u64);
@@ -67,11 +107,14 @@ impl Context {
             .insert(ceresdb_options);
 
         let logical_optimize_rules = Self::logical_optimize_rules();
-        let state =
-            SessionState::with_config_rt(df_session_config, Arc::new(RuntimeEnv::default()))
-                .with_query_planner(Arc::new(QueryPlannerAdapter))
-                .with_analyzer_rules(Self::analyzer_rules())
-                .with_optimizer_rules(logical_optimize_rules);
+        let env = RuntimeEnv {
+            memory_pool: Arc::new(TrackingMemoryPool { allocs }),
+            ..Default::default()
+        };
+        let state = SessionState::with_config_rt(df_session_config, Arc::new(env))
+            .with_query_planner(Arc::new(QueryPlannerAdapter))
+            .with_analyzer_rules(Self::analyzer_rules())
+            .with_optimizer_rules(logical_optimize_rules);
         let state = influxql_query::logical_optimizer::register_iox_logical_optimizers(state);
         let physical_optimizer =
             Self::apply_adapters_for_physical_optimize_rules(state.physical_optimizers());

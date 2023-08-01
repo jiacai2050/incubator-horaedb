@@ -2,11 +2,17 @@
 
 //! Query executor
 
-use std::{sync::Arc, time::Instant};
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Instant,
+};
 
 use async_trait::async_trait;
 use common_types::record_batch::RecordBatch;
-use datafusion::prelude::SessionContext;
+use datafusion::{execution::memory_pool::human_readable_size, prelude::SessionContext};
 use futures::TryStreamExt;
 use log::{debug, info};
 use macros::define_result;
@@ -99,7 +105,13 @@ impl Executor for ExecutorImpl {
 
         // Register catalogs to datafusion execution context.
         let catalogs = CatalogProviderAdapter::new_adapters(plan.tables.clone());
-        let df_ctx = ctx.build_df_session_ctx(&self.config, ctx.request_id, ctx.deadline);
+        let alloc_memory = Arc::new(AtomicUsize::new(0));
+        let df_ctx = ctx.build_df_session_ctx(
+            &self.config,
+            ctx.request_id,
+            ctx.deadline,
+            alloc_memory.clone(),
+        );
         for (name, catalog) in catalogs {
             df_ctx.register_catalog(&name, Arc::new(catalog));
         }
@@ -119,9 +131,10 @@ impl Executor for ExecutorImpl {
         let record_batches = collect(stream).await?;
 
         info!(
-            "Executor executed plan, request_id:{}, cost:{}ms, plan_and_metrics: {}",
+            "Executor executed plan, request_id:{}, cost:{}ms, alloc:{}, plan_and_metrics: {}",
             ctx.request_id,
             begin_instant.saturating_elapsed().as_millis(),
+            human_readable_size(alloc_memory.load(Ordering::Relaxed)),
             physical_plan.metrics_to_string()
         );
 
