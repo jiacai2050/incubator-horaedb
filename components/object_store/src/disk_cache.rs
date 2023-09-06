@@ -685,6 +685,10 @@ impl ObjectStore for DiskCacheStore {
             // Allocate a new buffer instead of the `aligned_bytes` to avoid memory
             // overhead.
             let mut bytes_buf = BytesMut::with_capacity(range.len());
+            if range.end - aligned_start > range.len() {
+                let len = aligned_bytes.len();
+                log::info!("Invalid range happens, location:{location}, file_size:{file_size}, range:{range:?}, aligned_range:{aligned_range:?}, aligned_bytes:{len}");
+            }
             bytes_buf.extend_from_slice(
                 &aligned_bytes[(range.start - aligned_start)..(range.end - aligned_start)],
             );
