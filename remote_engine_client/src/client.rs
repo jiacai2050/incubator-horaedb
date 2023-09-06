@@ -74,8 +74,17 @@ impl Client {
     }
 
     pub async fn read(&self, request: ReadRequest) -> Result<ClientReadRecordBatchStream> {
+        let need_debug = request.table.table.contains("eventmonitor_100291");
+        let id = request.read_request.request_id;
+        if need_debug {
+            log::info!("debug remote begin route, {request:?}");
+        }
         // Find the channel from router firstly.
         let route_context = self.cached_router.route(&request.table).await?;
+        let endpoint = route_context.endpoint;
+        if need_debug {
+            log::info!("debug remote request, {request:?}, get endpoint:{endpoint:?}");
+        }
 
         // Read from remote.
         let table_ident = request.table.clone();
@@ -87,6 +96,9 @@ impl Client {
                 msg: "Failed to convert ReadRequest to pb",
             })?;
 
+        if need_debug {
+            log::info!("debug remote begin request, {id}");
+        }
         let result = rpc_client
             .read(Request::new(request_pb))
             .await
@@ -95,6 +107,9 @@ impl Client {
                 msg: "Failed to read from remote engine",
             });
 
+        if need_debug {
+            log::info!("debug remote get resp, {id}");
+        }
         let response = match result {
             Ok(response) => response,
 

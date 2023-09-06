@@ -103,6 +103,7 @@ impl From<TableIdentifier> for ceresdbproto::remote_engine::TableIdentifier {
     }
 }
 
+#[derive(Debug)]
 pub struct ReadRequest {
     pub table: TableIdentifier,
     pub read_request: TableReadRequest,
