@@ -261,8 +261,14 @@ impl Table for PartitionTableImpl {
                 .context(LocatePartitions)?
         };
 
+        let need_debug = self.table_data.table_name.contains("eventmonitor_100291");
+        let id = request.request_id;
+        if need_debug {
+            log::info!("debug remote request, {request:?}")
+        }
         // Query streams through remote engine.
         let mut futures = FuturesUnordered::new();
+        let total = partitions.len();
         for partition in partitions {
             let read_partition = self.remote_engine.read(RemoteReadRequest {
                 table: self.get_sub_table_ident(partition),
@@ -271,8 +277,17 @@ impl Table for PartitionTableImpl {
             futures.push(read_partition);
         }
 
+        if need_debug {
+            log::info!("debug remote begin collect, id:{id}")
+        }
+
+        let mut i = 0;
         let mut record_batch_streams = Vec::with_capacity(futures.len());
         while let Some(record_batch_stream) = futures.next().await {
+            if need_debug {
+                log::info!("debug remote get one stream, id={id}, total={total}, i={i}");
+                i += 1;
+            }
             let record_batch_stream = record_batch_stream
                 .box_err()
                 .context(Scan { table: self.name() })?;
