@@ -671,7 +671,7 @@ impl DiskCacheStore {
         guard.cancel();
         drop(guard);
 
-        if fetch_blocks.len() <= 0 {
+        if fetch_blocks.is_empty() {
             return Ok(rxs);
         }
 
