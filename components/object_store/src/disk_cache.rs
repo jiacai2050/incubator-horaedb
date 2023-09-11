@@ -19,7 +19,7 @@
 //! Page is used for reasons below:
 //! - reduce file size in case of there are too many request with small range.
 
-use std::{ops::Range, result::Result as StdResult, sync::Arc, fmt::Display};
+use std::{fmt::Display, num::ParseIntError, ops::Range, result::Result as StdResult, sync::Arc};
 
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
@@ -64,6 +64,15 @@ enum Error {
     ))]
     ParseFilenameToRequestKey {
         filename: String,
+        backtrace: Backtrace,
+    },
+
+    #[snafu(display(
+        "parse filename's range to RequestKey error, file:{filename}.\nbacktrace:\n{backtrace}",
+    ))]
+    ParseFilenameToRequestKeyRangeParse {
+        filename: String,
+        source: ParseIntError,
         backtrace: Backtrace,
     },
 
@@ -625,8 +634,16 @@ impl DiskCacheStore {
     fn filename_to_request_key(file_name: String) -> Result<RequestKey> {
         let parts: Vec<&str> = file_name.split('-').collect();
         if let [filename, start, end] = parts[..] {
-            let start: usize = start.parse::<usize>().unwrap();
-            let end = end.parse::<usize>().unwrap();
+            let start = start
+                .parse::<usize>()
+                .context(ParseFilenameToRequestKeyRangeParse {
+                    filename: file_name.clone(),
+                })?;
+            let end = end
+                .parse::<usize>()
+                .context(ParseFilenameToRequestKeyRangeParse {
+                    filename: file_name.clone(),
+                })?;
             Ok(RequestKey::new(&Path::from(filename), Range { start, end }))
         } else {
             ParseFilenameToRequestKey {
