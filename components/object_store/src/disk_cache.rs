@@ -434,6 +434,35 @@ impl Paging {
     }
 }
 
+struct CacheKey {
+    aligned_range: Range<usize>,
+    filename: String,
+}
+
+impl CacheKey {
+    pub fn new(location: &Path, aligned_range: Range<usize>) -> Self {
+        let filename = CacheKey::page_cache_name(location, &aligned_range);
+        CacheKey {
+            aligned_range,
+            filename,
+        }
+    }
+
+    pub fn get_filename(&self) -> &String {
+        &self.filename
+    }
+
+    /// Generate the filename of a page file.
+    pub fn page_cache_name(location: &Path, range: &Range<usize>) -> String {
+        format!(
+            "{}-{}-{}",
+            location.as_ref().replace('/', "-"),
+            range.start,
+            range.end
+        )
+    }
+}
+
 /// There will be two kinds of file in this cache:
 /// 1. manifest.json, which contains metadata, like
 /// ```json
@@ -595,16 +624,6 @@ impl DiskCacheStore {
         Ok(())
     }
 
-    /// Generate the filename of a page file.
-    fn page_cache_name(location: &Path, range: &Range<usize>) -> String {
-        format!(
-            "{}-{}-{}",
-            location.as_ref().replace('/', "-"),
-            range.start,
-            range.end
-        )
-    }
-
     async fn deduped_fetch_data(
         &self,
         location: &Path,
@@ -613,19 +632,17 @@ impl DiskCacheStore {
         let aligned_ranges = aligned_ranges.into_iter();
         let (size, _) = aligned_ranges.size_hint();
         let mut rxs = Vec::with_capacity(size);
-        let mut need_fetch_block = Vec::new();
-        let mut need_fetch_block_cache_key = Vec::new();
+        let mut fetch_blocks = Vec::new();
 
         for aligned_range in aligned_ranges {
             let (tx, rx) = oneshot::channel();
-            let cache_key = Self::page_cache_name(location, &aligned_range);
+            let cache_key = CacheKey::new(location, aligned_range);
 
             if let notifier::notifier::RequestResult::First = self
                 .request_notifiers
-                .insert_notifier(cache_key.to_owned(), tx)
+                .insert_notifier(cache_key.get_filename().clone(), tx)
             {
-                need_fetch_block.push(aligned_range);
-                need_fetch_block_cache_key.push(cache_key);
+                fetch_blocks.push(cache_key);
             } else {
                 DISK_CACHE_DEDUP_COUNT.inc();
             }
@@ -634,24 +651,39 @@ impl DiskCacheStore {
         }
 
         let mut guard = ExecutionGuard::new(|| {
-            for cache_key in &need_fetch_block_cache_key {
-                let _ = self.request_notifiers.take_notifiers(cache_key);
+            for cache_key in &fetch_blocks {
+                let _ = self.request_notifiers.take_notifiers(&cache_key.filename);
             }
         });
 
         let fetched_bytes = self
             .underlying_store
-            .get_ranges(location, &need_fetch_block[..])
+            .get_ranges(
+                location,
+                fetch_blocks
+                    .iter()
+                    .map(|i| i.aligned_range.clone())
+                    .collect::<Vec<_>>()
+                    .as_slice(),
+            )
             .await;
 
         guard.cancel();
         drop(guard);
 
+        if fetch_blocks.len() <= 0 {
+            return Ok(rxs);
+        }
+
         // need take all correspond cache_key's notifiers from request_notifiers to
         // prevent future cancelled
-        let notifiers_vec: Vec<_> = need_fetch_block_cache_key
+        let notifiers_vec: Vec<_> = fetch_blocks
             .iter()
-            .map(|cache_key| self.request_notifiers.take_notifiers(cache_key).unwrap())
+            .map(|cache_key| {
+                self.request_notifiers
+                    .take_notifiers(cache_key.get_filename())
+                    .unwrap()
+            })
             .collect();
 
         let fetched_bytes = match fetched_bytes {
@@ -674,9 +706,11 @@ impl DiskCacheStore {
         for ((bytes, notifiers), cache_key) in fetched_bytes
             .into_iter()
             .zip(notifiers_vec.into_iter())
-            .zip(need_fetch_block_cache_key.into_iter())
+            .zip(fetch_blocks.into_iter())
         {
-            self.cache.insert_data(cache_key, bytes.clone()).await;
+            self.cache
+                .insert_data(cache_key.filename, bytes.clone())
+                .await;
             for notifier in notifiers {
                 if let Err(e) = notifier.send(Ok(bytes.clone())) {
                     error!("Failed to send notifier success result, err:{:?}.", e);
@@ -778,7 +812,7 @@ impl ObjectStore for DiskCacheStore {
         if num_pages == 1 {
             let aligned_end = (aligned_start + self.page_size).min(file_size);
             let aligned_range = aligned_start..aligned_end;
-            let filename = Self::page_cache_name(location, &aligned_range);
+            let filename = CacheKey::page_cache_name(location, &aligned_range);
             let range_in_file = (range.start - aligned_start)..(range.end - aligned_start);
             if let Some(bytes) = self.cache.get_data(&filename, &range_in_file).await {
                 return Ok(bytes);
@@ -812,7 +846,7 @@ impl ObjectStore for DiskCacheStore {
                     let real_end = page_end.min(range.end);
                     (real_start - page_start)..(real_end - page_start)
                 };
-                let filename = Self::page_cache_name(location, &(page_start..page_end));
+                let filename = CacheKey::page_cache_name(location, &(page_start..page_end));
                 if let Some(bytes) = self.cache.get_data(&filename, &range_in_file).await {
                     paged_bytes[page_idx] = Some(bytes);
                 } else {
@@ -945,7 +979,7 @@ mod test {
     fn test_file_exists(cache_dir: &TempDir, location: &Path, range: &Range<usize>) -> bool {
         cache_dir
             .path()
-            .join(DiskCacheStore::page_cache_name(location, range))
+            .join(CacheKey::page_cache_name(location, range))
             .exists()
     }
 
@@ -988,9 +1022,8 @@ mod test {
                     .inner
                     .cache
                     .meta_cache
-                    .lock(&DiskCacheStore::page_cache_name(&location, &range).as_str());
-                assert!(data_cache
-                    .contains(DiskCacheStore::page_cache_name(&location, &range).as_str()));
+                    .lock(&CacheKey::page_cache_name(&location, &range).as_str());
+                assert!(data_cache.contains(CacheKey::page_cache_name(&location, &range).as_str()));
                 assert!(test_file_exists(&store.cache_dir, &location, &range));
             }
 
@@ -999,9 +1032,9 @@ mod test {
                     .inner
                     .cache
                     .meta_cache
-                    .lock(&DiskCacheStore::page_cache_name(&location, &range).as_str());
+                    .lock(&CacheKey::page_cache_name(&location, &range).as_str());
                 assert!(data_cache
-                    .pop(&DiskCacheStore::page_cache_name(&location, &range))
+                    .pop(&CacheKey::page_cache_name(&location, &range))
                     .is_some());
             }
         }
@@ -1259,7 +1292,7 @@ mod test {
                     .unwrap()
             };
             for range in [16..32, 32..48, 48..64, 64..80, 80..96, 96..112] {
-                let filename = DiskCacheStore::page_cache_name(&location, &range);
+                let filename = CacheKey::page_cache_name(&location, &range);
                 let cache = store.cache.meta_cache.lock(&filename);
                 assert!(cache.contains(&filename));
                 assert!(test_file_exists(&cache_dir, &location, &range));
