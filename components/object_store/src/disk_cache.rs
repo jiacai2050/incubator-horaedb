@@ -19,7 +19,7 @@
 //! Page is used for reasons below:
 //! - reduce file size in case of there are too many request with small range.
 
-use std::{fmt::Display, ops::Range, result::Result as StdResult, sync::Arc};
+use std::{ops::Range, result::Result as StdResult, sync::Arc, fmt::Display};
 
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
@@ -56,6 +56,14 @@ enum Error {
     Io {
         file: String,
         source: std::io::Error,
+        backtrace: Backtrace,
+    },
+
+    #[snafu(display(
+        "parse filename to RequestKey error, file:{filename}.\nbacktrace:\n{backtrace}",
+    ))]
+    ParseFilenameToRequestKey {
+        filename: String,
         backtrace: Backtrace,
     },
 
@@ -195,7 +203,7 @@ impl PageFileEncoder {
 }
 
 /// The mapping is PageFileName -> PageMeta.
-type PageMetaCache = LruCache<String, PageMeta>;
+type PageMetaCache = LruCache<RequestKey, PageMeta>;
 
 #[derive(Clone, Debug)]
 struct PageMeta {
@@ -238,34 +246,38 @@ impl DiskCache {
         })
     }
 
-    fn insert_page_meta(&self, filename: String, page_meta: PageMeta) -> Option<String> {
-        let mut cache = self.meta_cache.lock(&filename);
+    fn insert_page_meta(&self, request_key: RequestKey, page_meta: PageMeta) -> Option<RequestKey> {
+        let mut cache = self.meta_cache.lock(&request_key);
         debug!(
-            "Update the meta cache, file:{filename}, len:{}, cap_per_part:{}",
+            "Update the meta cache, file:{}, len:{}, cap_per_part:{}",
+            request_key.get_filename(),
             cache.cap(),
             cache.len()
         );
 
         cache
-            .push(filename, page_meta)
+            .push(request_key, page_meta)
             .map(|(filename, _)| filename)
     }
 
-    async fn insert_data(&self, filename: String, value: Bytes) {
+    async fn insert_data(&self, request_key: RequestKey, value: Bytes) {
         let page_meta = {
             let file_size = PageFileEncoder::encoded_size(value.len());
             PageMeta { file_size }
         };
-        let evicted_file = self.insert_page_meta(filename.clone(), page_meta);
+        let evicted_file = self.insert_page_meta(request_key.clone(), page_meta);
 
         let do_persist = || async {
-            if let Err(e) = self.persist_bytes(&filename, value).await {
-                warn!("Failed to persist cache, file:{filename}, err:{e}");
+            if let Err(e) = self.persist_bytes(request_key.get_filename(), value).await {
+                warn!(
+                    "Failed to persist cache, file:{}, err:{e}",
+                    request_key.get_filename()
+                );
             }
         };
 
-        if let Some(evicted_file) = evicted_file {
-            if evicted_file == filename {
+        if let Some(evicted_request_key) = evicted_file {
+            if evicted_request_key == request_key {
                 // No need to do persist and removal.
                 return;
             }
@@ -274,8 +286,11 @@ impl DiskCache {
             do_persist().await;
 
             // Remove the evicted file.
-            debug!("Evicted file:{evicted_file} is to be removed");
-            self.remove_file_by_name(&evicted_file).await;
+            debug!(
+                "Evicted file:{} is to be removed",
+                evicted_request_key.get_filename()
+            );
+            self.remove_file_by_request_key(&evicted_request_key).await;
         } else {
             do_persist().await;
         }
@@ -285,59 +300,64 @@ impl DiskCache {
     ///
     /// If the bytes is invalid (its size is different from the recorded one),
     /// remove it and return None.
-    async fn get_data(&self, filename: &str, range: &Range<usize>) -> Option<Bytes> {
+    async fn get_data(&self, request_key: &RequestKey, range: &Range<usize>) -> Option<Bytes> {
         let file_size = {
-            let mut cache = self.meta_cache.lock(&filename);
-            match cache.get(filename) {
+            let mut cache = self.meta_cache.lock(&request_key);
+            match cache.get(request_key) {
                 Some(page_meta) => page_meta.file_size,
                 None => return None,
             }
         };
 
-        match self.read_bytes(filename, range, file_size).await {
+        match self.read_bytes(request_key, range, file_size).await {
             Ok(ReadBytesResult::Integrate(v)) => Some(v.into()),
             Ok(ReadBytesResult::Corrupted {
                 file_size: real_file_size,
             }) => {
                 warn!(
-                    "File:{filename} is corrupted, expect:{file_size}, got:{real_file_size}, and it will be removed",
+                    "File:{} is corrupted, expect:{file_size}, got:{real_file_size}, and it will be removed",
+                    request_key.get_filename()
                 );
 
                 {
-                    let mut cache = self.meta_cache.lock(&filename);
-                    cache.pop(filename);
+                    let mut cache = self.meta_cache.lock(&request_key);
+                    cache.pop(request_key);
                 }
 
-                self.remove_file_by_name(filename).await;
+                self.remove_file_by_request_key(request_key).await;
 
                 None
             }
             Ok(ReadBytesResult::OutOfRange) => {
                 warn!(
-                    "File:{filename} is not enough to read, range:{range:?}, file_size:{file_size}, and it will be removed",
+                    "File:{} is not enough to read, range:{range:?}, file_size:{file_size}, and it will be removed",
+                    request_key.get_filename()
                 );
 
                 {
-                    let mut cache = self.meta_cache.lock(&filename);
-                    cache.pop(filename);
+                    let mut cache = self.meta_cache.lock(&request_key);
+                    cache.pop(request_key);
                 }
 
-                self.remove_file_by_name(filename).await;
+                self.remove_file_by_request_key(request_key).await;
 
                 None
             }
             Err(e) => {
-                warn!("Failed to read file:{filename} from the disk cache, err:{e}");
+                warn!(
+                    "Failed to read file:{} from the disk cache, err:{e}",
+                    request_key.get_filename()
+                );
                 None
             }
         }
     }
 
-    async fn remove_file_by_name(&self, filename: &str) {
-        debug!("Try to remove file:{filename}");
+    async fn remove_file_by_request_key(&self, request_key: &RequestKey) {
+        debug!("Try to remove file:{}", request_key.get_filename());
 
         let file_path = std::path::Path::new(&self.root_dir)
-            .join(filename)
+            .join(request_key.get_filename())
             .into_os_string()
             .into_string()
             .unwrap();
@@ -368,7 +388,7 @@ impl DiskCache {
     /// thought as corrupted file.
     async fn read_bytes(
         &self,
-        filename: &str,
+        request_key: &RequestKey,
         range: &Range<usize>,
         expect_file_size: usize,
     ) -> std::io::Result<ReadBytesResult> {
@@ -377,7 +397,7 @@ impl DiskCache {
         }
 
         let file_path = std::path::Path::new(&self.root_dir)
-            .join(filename)
+            .join(request_key.get_filename())
             .into_os_string()
             .into_string()
             .unwrap();
@@ -434,15 +454,33 @@ impl Paging {
     }
 }
 
-struct CacheKey {
+#[derive(Eq, Clone)]
+struct RequestKey {
     aligned_range: Range<usize>,
     filename: String,
 }
 
-impl CacheKey {
+impl std::hash::Hash for RequestKey {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.filename.hash(state);
+    }
+}
+
+impl PartialEq for RequestKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.filename == other.filename
+    }
+}
+
+impl RequestKey {
     pub fn new(location: &Path, aligned_range: Range<usize>) -> Self {
-        let filename = CacheKey::page_cache_name(location, &aligned_range);
-        CacheKey {
+        let filename = format!(
+            "{}-{}-{}",
+            location.as_ref().replace('/', "-"),
+            aligned_range.start,
+            aligned_range.end
+        );
+        RequestKey {
             aligned_range,
             filename,
         }
@@ -450,16 +488,6 @@ impl CacheKey {
 
     pub fn get_filename(&self) -> &String {
         &self.filename
-    }
-
-    /// Generate the filename of a page file.
-    pub fn page_cache_name(location: &Path, range: &Range<usize>) -> String {
-        format!(
-            "{}-{}-{}",
-            location.as_ref().replace('/', "-"),
-            range.start,
-            range.end
-        )
     }
 }
 
@@ -594,6 +622,20 @@ impl DiskCacheStore {
         Ok(manifest)
     }
 
+    fn filename_to_request_key(file_name: String) -> Result<RequestKey> {
+        let parts: Vec<&str> = file_name.split('-').collect();
+        if let [filename, start, end] = parts[..] {
+            let start: usize = start.parse::<usize>().unwrap();
+            let end = end.parse::<usize>().unwrap();
+            Ok(RequestKey::new(&Path::from(filename), Range { start, end }))
+        } else {
+            ParseFilenameToRequestKey {
+                filename: file_name,
+            }
+            .fail()?
+        }
+    }
+
     async fn recover_cache(cache_dir_path: &str, cache: &DiskCache) -> Result<()> {
         let mut cache_dir = tokio::fs::read_dir(cache_dir_path).await.context(Io {
             file: cache_dir_path,
@@ -618,7 +660,7 @@ impl DiskCacheStore {
             };
             info!("Disk cache recover_cache, filename:{file_name}, size:{file_size}");
             let page_meta = PageMeta { file_size };
-            cache.insert_page_meta(file_name, page_meta);
+            cache.insert_page_meta(Self::filename_to_request_key(file_name)?, page_meta);
         }
 
         Ok(())
@@ -636,18 +678,22 @@ impl DiskCacheStore {
 
         for aligned_range in aligned_ranges {
             let (tx, rx) = oneshot::channel();
-            let cache_key = CacheKey::new(location, aligned_range);
+            let request_key = RequestKey::new(location, aligned_range);
 
             if let notifier::notifier::RequestResult::First = self
                 .request_notifiers
-                .insert_notifier(cache_key.get_filename().clone(), tx)
+                .insert_notifier(request_key.get_filename().clone(), tx)
             {
-                fetch_blocks.push(cache_key);
+                fetch_blocks.push(request_key);
             } else {
                 DISK_CACHE_DEDUP_COUNT.inc();
             }
 
             rxs.push(rx);
+        }
+
+        if fetch_blocks.is_empty() {
+            return Ok(rxs);
         }
 
         let mut guard = ExecutionGuard::new(|| {
@@ -670,10 +716,6 @@ impl DiskCacheStore {
 
         guard.cancel();
         drop(guard);
-
-        if fetch_blocks.is_empty() {
-            return Ok(rxs);
-        }
 
         // need take all correspond cache_key's notifiers from request_notifiers to
         // prevent future cancelled
@@ -703,14 +745,12 @@ impl DiskCacheStore {
             Ok(v) => v,
         };
 
-        for ((bytes, notifiers), cache_key) in fetched_bytes
+        for ((bytes, notifiers), request_key) in fetched_bytes
             .into_iter()
             .zip(notifiers_vec.into_iter())
             .zip(fetch_blocks.into_iter())
         {
-            self.cache
-                .insert_data(cache_key.filename, bytes.clone())
-                .await;
+            self.cache.insert_data(request_key, bytes.clone()).await;
             for notifier in notifiers {
                 if let Err(e) = notifier.send(Ok(bytes.clone())) {
                     error!("Failed to send notifier success result, err:{:?}.", e);
@@ -812,14 +852,16 @@ impl ObjectStore for DiskCacheStore {
         if num_pages == 1 {
             let aligned_end = (aligned_start + self.page_size).min(file_size);
             let aligned_range = aligned_start..aligned_end;
-            let filename = CacheKey::page_cache_name(location, &aligned_range);
+            let request_key = RequestKey::new(location, aligned_range);
             let range_in_file = (range.start - aligned_start)..(range.end - aligned_start);
-            if let Some(bytes) = self.cache.get_data(&filename, &range_in_file).await {
+            if let Some(bytes) = self.cache.get_data(&request_key, &range_in_file).await {
                 return Ok(bytes);
             }
             // This page is missing from the disk cache, let's fetch it from the
             // underlying store and insert it to the disk cache.
-            let aligned_bytes = self.fetch_and_cache_data(location, &aligned_range).await?;
+            let aligned_bytes = self
+                .fetch_and_cache_data(location, &request_key.aligned_range)
+                .await?;
 
             // Allocate a new buffer instead of the `aligned_bytes` to avoid memory
             // overhead.
@@ -846,8 +888,8 @@ impl ObjectStore for DiskCacheStore {
                     let real_end = page_end.min(range.end);
                     (real_start - page_start)..(real_end - page_start)
                 };
-                let filename = CacheKey::page_cache_name(location, &(page_start..page_end));
-                if let Some(bytes) = self.cache.get_data(&filename, &range_in_file).await {
+                let request_key = RequestKey::new(location, page_start..page_end);
+                if let Some(bytes) = self.cache.get_data(&request_key, &range_in_file).await {
                     paged_bytes[page_idx] = Some(bytes);
                 } else {
                     num_missing_pages += 1;
@@ -944,7 +986,7 @@ mod test {
     use tempfile::{tempdir, TempDir};
     use upstream::local::LocalFileSystem;
 
-    use super::*;
+    use super::{RequestKey, *};
 
     struct StoreWithCacheDir {
         inner: DiskCacheStore,
@@ -976,11 +1018,8 @@ mod test {
         }
     }
 
-    fn test_file_exists(cache_dir: &TempDir, location: &Path, range: &Range<usize>) -> bool {
-        cache_dir
-            .path()
-            .join(CacheKey::page_cache_name(location, range))
-            .exists()
+    fn test_file_exists(cache_dir: &TempDir, request_key: &RequestKey) -> bool {
+        cache_dir.path().join(request_key.get_filename()).exists()
     }
 
     #[tokio::test]
@@ -1018,24 +1057,16 @@ mod test {
         // remove cached values, then get again
         {
             for range in [0..16, 16..32, 32..48, 48..64, 64..80, 80..96, 96..112] {
-                let data_cache = store
-                    .inner
-                    .cache
-                    .meta_cache
-                    .lock(&CacheKey::page_cache_name(&location, &range).as_str());
-                assert!(data_cache.contains(CacheKey::page_cache_name(&location, &range).as_str()));
-                assert!(test_file_exists(&store.cache_dir, &location, &range));
+                let request_key = RequestKey::new(&location, range.clone());
+                let data_cache = store.inner.cache.meta_cache.lock(&request_key);
+                assert!(data_cache.contains(&request_key));
+                assert!(test_file_exists(&store.cache_dir, &request_key));
             }
 
             for range in [16..32, 48..64, 80..96] {
-                let mut data_cache = store
-                    .inner
-                    .cache
-                    .meta_cache
-                    .lock(&CacheKey::page_cache_name(&location, &range).as_str());
-                assert!(data_cache
-                    .pop(&CacheKey::page_cache_name(&location, &range))
-                    .is_some());
+                let request_key = RequestKey::new(&location, range.clone());
+                let mut data_cache = store.inner.cache.meta_cache.lock(&request_key);
+                assert!(data_cache.pop(&request_key).is_some());
             }
         }
 
@@ -1110,18 +1141,36 @@ mod test {
         let _ = store.inner.get_range(&location, 0..16).await.unwrap();
         let _ = store.inner.get_range(&location, 16..32).await.unwrap();
         // cache is full now
-        assert!(test_file_exists(&store.cache_dir, &location, &(0..16)));
-        assert!(test_file_exists(&store.cache_dir, &location, &(16..32)));
+        assert!(test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 0..16)
+        ));
+        assert!(test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 16..32)
+        ));
 
         // insert new cache, evict oldest entry
         let _ = store.inner.get_range(&location, 32..48).await.unwrap();
-        assert!(!test_file_exists(&store.cache_dir, &location, &(0..16)));
-        assert!(test_file_exists(&store.cache_dir, &location, &(32..48)));
+        assert!(!test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 0..16)
+        ));
+        assert!(test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 32..48)
+        ));
 
         // insert new cache, evict oldest entry
         let _ = store.inner.get_range(&location, 48..64).await.unwrap();
-        assert!(!test_file_exists(&store.cache_dir, &location, &(16..32)));
-        assert!(test_file_exists(&store.cache_dir, &location, &(48..64)));
+        assert!(!test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 16..32)
+        ));
+        assert!(test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 48..64)
+        ));
     }
 
     #[tokio::test]
@@ -1151,41 +1200,95 @@ mod test {
         let _ = store.inner.get_range(&location, 0..16).await.unwrap();
         let _ = store.inner.get_range(&location, 16..32).await.unwrap();
         // partition 1 cache is full now
-        assert!(test_file_exists(&store.cache_dir, &location, &(0..16)));
-        assert!(test_file_exists(&store.cache_dir, &location, &(16..32)));
+        assert!(test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 0..16)
+        ));
+        assert!(test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 16..32)
+        ));
 
         let _ = store.inner.get_range(&location, 32..48).await.unwrap();
         let _ = store.inner.get_range(&location, 80..96).await.unwrap();
         // partition 0 cache is full now
 
-        assert!(test_file_exists(&store.cache_dir, &location, &(32..48)));
-        assert!(test_file_exists(&store.cache_dir, &location, &(80..96)));
+        assert!(test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 32..48)
+        ));
+        assert!(test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 80..96)
+        ));
 
         // insert new entry into partition 0, evict partition 0's oldest entry
         let _ = store.inner.get_range(&location, 96..112).await.unwrap();
-        assert!(!test_file_exists(&store.cache_dir, &location, &(32..48)));
-        assert!(test_file_exists(&store.cache_dir, &location, &(80..96)));
+        assert!(!test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 32..48)
+        ));
+        assert!(test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 80..96)
+        ));
 
-        assert!(test_file_exists(&store.cache_dir, &location, &(0..16)));
-        assert!(test_file_exists(&store.cache_dir, &location, &(16..32)));
+        assert!(test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 0..16)
+        ));
+        assert!(test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 16..32)
+        ));
 
         // insert new entry into partition 0, evict partition 0's oldest entry
         let _ = store.inner.get_range(&location, 128..144).await.unwrap();
-        assert!(!test_file_exists(&store.cache_dir, &location, &(80..96)));
-        assert!(test_file_exists(&store.cache_dir, &location, &(96..112)));
-        assert!(test_file_exists(&store.cache_dir, &location, &(128..144)));
+        assert!(!test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 80..96)
+        ));
+        assert!(test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 96..112)
+        ));
+        assert!(test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 128..144)
+        ));
 
-        assert!(test_file_exists(&store.cache_dir, &location, &(0..16)));
-        assert!(test_file_exists(&store.cache_dir, &location, &(16..32)));
+        assert!(test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 0..16)
+        ));
+        assert!(test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 16..32)
+        ));
 
         // insert new entry into partition 1, evict partition 1's oldest entry
         let _ = store.inner.get_range(&location, 64..80).await.unwrap();
-        assert!(!test_file_exists(&store.cache_dir, &location, &(0..16)));
-        assert!(test_file_exists(&store.cache_dir, &location, &(16..32)));
-        assert!(test_file_exists(&store.cache_dir, &location, &(64..80)));
+        assert!(!test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 0..16)
+        ));
+        assert!(test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 16..32)
+        ));
+        assert!(test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 64..80)
+        ));
 
-        assert!(test_file_exists(&store.cache_dir, &location, &(96..112)));
-        assert!(test_file_exists(&store.cache_dir, &location, &(128..144)));
+        assert!(test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 96..112)
+        ));
+        assert!(test_file_exists(
+            &store.cache_dir,
+            &RequestKey::new(&location, 128..144)
+        ));
     }
 
     #[tokio::test]
@@ -1292,10 +1395,10 @@ mod test {
                     .unwrap()
             };
             for range in [16..32, 32..48, 48..64, 64..80, 80..96, 96..112] {
-                let filename = CacheKey::page_cache_name(&location, &range);
-                let cache = store.cache.meta_cache.lock(&filename);
-                assert!(cache.contains(&filename));
-                assert!(test_file_exists(&cache_dir, &location, &range));
+                let cache_key = RequestKey::new(&location, range);
+                let cache = store.cache.meta_cache.lock(&cache_key);
+                assert!(cache.contains(&cache_key));
+                assert!(test_file_exists(&cache_dir, &cache_key));
             }
         };
     }
