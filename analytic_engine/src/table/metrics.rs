@@ -1,3 +1,17 @@
+// Copyright 2023 The CeresDB Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // Copyright 2023 The HoraeDB Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -31,7 +45,10 @@ use prometheus::{
 };
 use table_engine::{partition::maybe_extract_partitioned_table_name, table::TableStats};
 
-use crate::{sst::metrics::MaybeTableLevelMetrics as SstMaybeTableLevelMetrics, MetricsOptions};
+use crate::{
+    sst::metrics::MaybeTableLevelMetrics as SstMaybeTableLevelMetrics,
+    table::table_stats::TableStatsImpl, MetricsOptions,
+};
 
 const KB: f64 = 1024.0;
 const DEFAULT_METRICS_KEY: &str = "total";
@@ -143,23 +160,6 @@ lazy_static! {
     // End of histograms.
 }
 
-#[derive(Default)]
-struct AtomicTableStats {
-    num_write: AtomicU64,
-    num_read: AtomicU64,
-    num_flush: AtomicU64,
-}
-
-impl From<&AtomicTableStats> for TableStats {
-    fn from(stats: &AtomicTableStats) -> Self {
-        Self {
-            num_write: stats.num_write.load(Ordering::Relaxed),
-            num_read: stats.num_read.load(Ordering::Relaxed),
-            num_flush: stats.num_flush.load(Ordering::Relaxed),
-        }
-    }
-}
-
 /// Table metrics.
 ///
 /// Now the registered labels won't remove from the metrics vec to avoid panic
@@ -168,7 +168,7 @@ pub struct Metrics {
     /// The table name used for metric label
     maybe_table_name: String,
     /// Stats of a single table.
-    stats: Arc<AtomicTableStats>,
+    pub stats: Arc<TableStatsImpl>,
 
     compaction_input_sst_size_histogram: Histogram,
     compaction_output_sst_size_histogram: Histogram,
@@ -193,7 +193,7 @@ impl Default for Metrics {
     fn default() -> Self {
         Self {
             maybe_table_name: DEFAULT_METRICS_KEY.to_string(),
-            stats: Arc::new(AtomicTableStats::default()),
+            stats: Arc::new(TableStatsImpl::default()),
             compaction_input_sst_size_histogram: TABLE_COMPACTION_SST_SIZE_HISTOGRAM
                 .with_label_values(&["input"]),
             compaction_output_sst_size_histogram: TABLE_COMPACTION_SST_SIZE_HISTOGRAM
@@ -439,7 +439,7 @@ impl Metrics {
 }
 
 pub struct LocalFlushMetrics {
-    stats: Arc<AtomicTableStats>,
+    stats: Arc<TableStatsImpl>,
 
     flush_duration_histogram: LocalHistogram,
     flush_sst_num_histogram: LocalHistogram,

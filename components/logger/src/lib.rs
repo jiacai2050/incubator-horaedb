@@ -1,3 +1,17 @@
+// Copyright 2023 The CeresDB Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // Copyright 2023 The HoraeDB Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -97,21 +111,27 @@ pub fn file_drainer(path: &Option<String>) -> Option<CeresFormat<PlainDecorator<
 }
 
 /// Dispatcher for logs
-pub struct LogDispatcher<N, S> {
+pub struct LogDispatcher<N, S, T> {
     normal: N,
     slow: Option<S>,
+    table_stats: Option<T>,
 }
 
-impl<N: Drain, S: Drain> LogDispatcher<N, S> {
-    pub fn new(normal: N, slow: Option<S>) -> Self {
-        Self { normal, slow }
+impl<N: Drain, S: Drain, T: Drain> LogDispatcher<N, S, T> {
+    pub fn new(normal: N, slow: Option<S>, table_stats: Option<T>) -> Self {
+        Self {
+            normal,
+            slow,
+            table_stats,
+        }
     }
 }
 
-impl<N, S> Drain for LogDispatcher<N, S>
+impl<N, S, T> Drain for LogDispatcher<N, S, T>
 where
     N: Drain<Ok = (), Err = io::Error>,
     S: Drain<Ok = (), Err = io::Error>,
+    T: Drain<Ok = (), Err = io::Error>,
 {
     type Err = io::Error;
     type Ok = ();
@@ -122,6 +142,8 @@ where
             self.normal.log(record, values)
         } else if self.slow.is_some() && tag == SLOW_QUERY_TAG {
             self.slow.as_ref().unwrap().log(record, values)
+        } else if self.table_stats.is_some() && tag.starts_with("table_stats") {
+            self.table_stats.as_ref().unwrap().log(record, values)
         } else {
             // For crates outside ceresdb
             self.normal.log(record, values)
@@ -138,6 +160,8 @@ pub struct Config {
     pub async_channel_len: i32,
     pub slow_query_path: Option<String>,
     pub failed_query_path: Option<String>,
+    // TODO: maybe we should not collect table stats in log way.
+    pub table_stats_path: Option<String>,
 }
 
 impl Default for Config {
@@ -148,6 +172,7 @@ impl Default for Config {
             async_channel_len: 102400,
             slow_query_path: None,
             failed_query_path: None,
+            table_stats_path: None,
         }
     }
 }
@@ -166,7 +191,8 @@ pub fn init_log(config: &Config) -> Result<RuntimeLevel, SetLoggerError> {
 
     let normal_drain = term_drainer();
     let slow_drain = file_drainer(&config.slow_query_path);
-    let drain = LogDispatcher::new(normal_drain, slow_drain);
+    let table_stats_drain = file_drainer(&config.table_stats_path);
+    let drain = LogDispatcher::new(normal_drain, slow_drain, table_stats_drain);
 
     // Use async and init stdlog
     init_log_from_drain(
@@ -458,6 +484,7 @@ pub fn init_test_logger() {
     let term_drain = term_drainer();
     let drain = LogDispatcher::new(
         term_drain,
+        Option::<CeresFormat<PlainDecorator<File>>>::None,
         Option::<CeresFormat<PlainDecorator<File>>>::None,
     );
 

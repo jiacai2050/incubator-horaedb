@@ -1,3 +1,17 @@
+// Copyright 2023 The CeresDB Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // Copyright 2023 The HoraeDB Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -127,6 +141,8 @@ pub struct Config {
     pub remote_engine_client: remote_engine_client::config::Config,
 
     pub metrics: MetricsOptions,
+
+    pub table_stats: TableStatsOptions,
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
@@ -135,6 +151,11 @@ pub struct MetricsOptions {
     enable_table_level_metrics: bool,
 }
 
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(default)]
+pub struct TableStatsOptions {
+    col_filter_stats_ttl: Option<ReadableDuration>,
+}
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub enum RecoverMode {
     TableBased,
@@ -196,6 +217,7 @@ impl Default for Config {
             remote_engine_client: remote_engine_client::config::Config::default(),
             recover_mode: RecoverMode::TableBased,
             metrics: MetricsOptions::default(),
+            table_stats: TableStatsOptions::default(),
         }
     }
 }
