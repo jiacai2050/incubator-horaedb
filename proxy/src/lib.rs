@@ -41,7 +41,7 @@ pub const FORWARDED_FROM: &str = "forwarded-from";
 
 use std::{
     ops::Bound,
-    sync::Arc,
+    sync::{atomic::AtomicU64, Arc},
     time::{Duration, Instant},
 };
 
@@ -69,8 +69,8 @@ use interpreters::{
     factory::Factory,
     interpreter::{InterpreterPtr, Output},
 };
-use logger::{error, info, warn};
-use query_frontend::plan::Plan;
+use log::{error, info, warn};
+use query_frontend::{config::DynamicConfig as FrontendDynamicConfig, plan::Plan};
 use router::{endpoint::Endpoint, RouteRequest, Router};
 use serde::{Deserialize, Serialize};
 use snafu::{OptionExt, ResultExt};
@@ -629,6 +629,24 @@ impl Context {
             request_id: RequestId::next_id(),
             timeout,
             forwarded_from,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct DynamicConfig {
+    /// Dynamic config for frontend module
+    pub fronted: Arc<FrontendDynamicConfig>,
+
+    /// Slow threshold(seconds)
+    pub slow_threshold: Arc<AtomicU64>,
+}
+
+impl Default for DynamicConfig {
+    fn default() -> Self {
+        Self {
+            fronted: Default::default(),
+            slow_threshold: Arc::new(AtomicU64::new(5)),
         }
     }
 }

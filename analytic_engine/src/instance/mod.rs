@@ -57,9 +57,10 @@ use crate::{
         file::FilePurgerRef,
         meta_data::cache::MetaCacheRef,
         metrics::MaybeTableLevelMetrics,
+        DynamicConfig as SstDynamicConfig,
     },
     table::data::{TableDataRef, TableShardInfo},
-    RecoverMode, TableOptions,
+    DynamicConfig, RecoverMode, TableOptions,
 };
 
 #[allow(clippy::enum_variant_names)]
@@ -182,6 +183,9 @@ pub struct Instance {
     pub(crate) scan_options: ScanOptions,
     pub(crate) iter_options: Option<IterOptions>,
     pub(crate) recover_mode: RecoverMode,
+
+    /// Engine dynamic config
+    pub(crate) dynamic_config: Arc<DynamicConfig>,
 }
 
 impl Instance {
@@ -313,6 +317,7 @@ impl Instance {
 fn create_sst_read_option(
     scan_type: ScanType,
     scan_options: ScanOptions,
+    sst_dynamic_config: Arc<SstDynamicConfig>,
     maybe_table_level_metrics: Arc<MaybeTableLevelMetrics>,
     num_rows_per_row_group: usize,
     projected_schema: ProjectedSchema,
@@ -328,6 +333,7 @@ fn create_sst_read_option(
         predicate,
         meta_cache,
         scan_options,
+        sst_dynamic_config,
         runtime,
     }
 }

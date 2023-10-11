@@ -37,7 +37,7 @@ use proxy::{
 };
 use router::{rule_based::ClusterView, ClusterBasedRouter, RuleBasedRouter};
 use server::{
-    config::{StaticRouteConfig, StaticTopologyConfig},
+    config::{DynamicConfig, StaticRouteConfig, StaticTopologyConfig},
     local_tables::LocalTablesRecoverer,
     server::{Builder, DatafusionContext},
 };
@@ -132,6 +132,8 @@ async fn run_server_with_runtimes<T>(
     let limiter = Limiter::new(config.limiter.clone());
     let config_content = toml::to_string(&config).expect("Fail to serialize config");
 
+    let dynamic_config = Arc::new(DynamicConfig::new(&config.analytic));
+
     let builder = Builder::new(config.server.clone())
         .node_addr(config.node.addr.clone())
         .config_content(config_content)
@@ -140,13 +142,15 @@ async fn run_server_with_runtimes<T>(
         .function_registry(function_registry)
         .limiter(limiter)
         .datafusion_context(datafusion_context)
-        .query_engine_config(config.query_engine.clone());
+        .query_engine_config(config.query_engine.clone())
+        .dynamic_config(dynamic_config.clone());
 
     let wal_builder = T::default();
     let builder = match &config.cluster_deployment {
         None => {
             build_without_meta(
                 &config,
+                &dynamic_config,
                 &StaticRouteConfig::default(),
                 builder,
                 engine_runtimes.clone(),
@@ -155,11 +159,20 @@ async fn run_server_with_runtimes<T>(
             .await
         }
         Some(ClusterDeployment::NoMeta(v)) => {
-            build_without_meta(&config, v, builder, engine_runtimes.clone(), wal_builder).await
+            build_without_meta(
+                &config,
+                &dynamic_config,
+                v,
+                builder,
+                engine_runtimes.clone(),
+                wal_builder,
+            )
+            .await
         }
         Some(ClusterDeployment::WithMeta(cluster_config)) => {
             build_with_meta(
                 &config,
+                &dynamic_config,
                 cluster_config,
                 builder,
                 engine_runtimes.clone(),
@@ -199,6 +212,7 @@ async fn build_table_engine_proxy(engine_builder: EngineBuilder<'_>) -> Arc<Tabl
 
 async fn build_with_meta<T: WalsOpener>(
     config: &Config,
+    dynamic_config: &Arc<DynamicConfig>,
     cluster_config: &ClusterConfig,
     builder: Builder,
     runtimes: Arc<EngineRuntimes>,
@@ -245,6 +259,7 @@ async fn build_with_meta<T: WalsOpener>(
         .expect("Failed to setup analytic engine");
     let engine_builder = EngineBuilder {
         config: &config.analytic,
+        dynamic_config: &dynamic_config.engine,
         engine_runtimes: runtimes.clone(),
         opened_wals: opened_wals.clone(),
     };
@@ -271,6 +286,7 @@ async fn build_with_meta<T: WalsOpener>(
 
 async fn build_without_meta<T: WalsOpener>(
     config: &Config,
+    dynamic_config: &Arc<DynamicConfig>,
     static_route_config: &StaticRouteConfig,
     builder: Builder,
     runtimes: Arc<EngineRuntimes>,
@@ -282,6 +298,7 @@ async fn build_without_meta<T: WalsOpener>(
         .expect("Failed to setup analytic engine");
     let engine_builder = EngineBuilder {
         config: &config.analytic,
+        dynamic_config: &dynamic_config.engine,
         engine_runtimes: runtimes.clone(),
         opened_wals: opened_wals.clone(),
     };

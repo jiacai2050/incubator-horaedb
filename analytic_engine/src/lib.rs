@@ -36,6 +36,8 @@ pub mod table_meta_set_impl;
 #[cfg(any(test, feature = "test"))]
 pub mod tests;
 
+use std::sync::{atomic::AtomicBool, Arc};
+
 use manifest::details::Options as ManifestOptions;
 use message_queue::kafka::config::Config as KafkaConfig;
 use object_store::config::StorageOptions;
@@ -48,6 +50,7 @@ use wal::{
     rocks_impl::config::Config as RocksDBWalConfig, table_kv_impl::model::NamespaceConfig,
 };
 
+use crate::sst::DynamicConfig as SstDynamicConfig;
 pub use crate::{compaction::scheduler::SchedulerConfig, table_options::TableOptions};
 
 /// Config of analytic engine
@@ -95,6 +98,8 @@ pub struct Config {
     pub scan_max_record_batches_in_flight: usize,
     /// Sst background reading parallelism
     pub sst_background_read_parallelism: usize,
+    /// Reader options
+    pub sst_reader_options: ReaderOptions,
     /// Number of streams to prefetch
     pub num_streams_to_prefetch: usize,
     /// Max buffer size for writing sst
@@ -123,6 +128,18 @@ pub struct Config {
     pub remote_engine_client: remote_engine_client::config::Config,
 
     pub metrics: MetricsOptions,
+}
+
+#[derive(Debug, Default, Clone, Deserialize, Serialize)]
+#[serde(default)]
+pub struct ParquetReaderOptions {
+    enable_page_filter: bool,
+    enable_lazy_row_filter: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub enum ReaderOptions {
+    Parquet(ParquetReaderOptions),
 }
 
 #[derive(Debug, Default, Clone, Deserialize, Serialize)]
@@ -158,6 +175,7 @@ impl Default for Config {
             preflush_write_buffer_size_ratio: 0.75,
             scan_batch_size: None,
             sst_background_read_parallelism: 8,
+            sst_reader_options: ReaderOptions::Parquet(ParquetReaderOptions::default()),
             num_streams_to_prefetch: 2,
             scan_max_record_batches_in_flight: 1024,
             write_sst_max_buffer_size: ReadableSize::mb(10),
@@ -324,4 +342,21 @@ pub enum WalStorageConfig {
     RocksDB(Box<RocksDBConfig>),
     Obkv(Box<ObkvWalConfig>),
     Kafka(Box<KafkaWalConfig>),
+}
+
+/// Analytic dynamic config
+#[derive(Debug, Default, Clone)]
+pub struct DynamicConfig {
+    pub sst: Arc<SstDynamicConfig>,
+}
+
+impl DynamicConfig {
+    pub fn new(config: &Config) -> Self {
+        let mut sst = SstDynamicConfig::default();
+        let ReaderOptions::Parquet(opts) = &config.sst_reader_options;
+        sst.parquet_enable_page_filter = AtomicBool::new(opts.enable_page_filter);
+        sst.parquet_enable_lazy_row_filter = AtomicBool::new(opts.enable_lazy_row_filter);
+
+        Self { sst: Arc::new(sst) }
+    }
 }

@@ -43,7 +43,7 @@ use time_ext::ReadableDuration;
 use crate::{
     setup::{EngineBuilder, MemWalsOpener, OpenedWals, RocksDBWalsOpener, WalsOpener},
     tests::table::{self, FixedSchemaTable, RowTuple},
-    Config, RecoverMode, RocksDBConfig, WalStorageConfig,
+    Config, DynamicConfig, RecoverMode, RocksDBConfig, WalStorageConfig,
 };
 
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
@@ -119,9 +119,10 @@ impl<T: WalsOpener> TestContext<T> {
                 .await
                 .unwrap()
         };
-
+        let dynamic_config = Arc::new(DynamicConfig::default());
         let engine_builder = EngineBuilder {
             config: &self.config,
+            dynamic_config: &dynamic_config,
             engine_runtimes: self.runtimes.clone(),
             opened_wals: opened_wals.clone(),
         };
