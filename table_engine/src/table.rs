@@ -354,11 +354,7 @@ impl From<ReadOptions> for ceresdbproto::remote_engine::ReadOptions {
         Self {
             batch_size: opts.batch_size as u64,
             read_parallelism: opts.read_parallelism as u64,
-            timeout_ms: if let Some(deadline) = opts.deadline {
-                deadline.duration_since(Instant::now()).as_millis() as i64
-            } else {
-                NO_TIMEOUT
-            },
+            timeout_ms: NO_TIMEOUT,
         }
     }
 }
@@ -437,7 +433,7 @@ impl TryFrom<ReadRequest> for ceresdbproto::remote_engine::TableReadRequest {
                 })?;
 
         Ok(Self {
-            request_id: request.request_id.as_u64(),
+            request_id: 1, // TODO: use fixed
             opts: Some(request.opts.into()),
             projected_schema: Some(request.projected_schema.into()),
             predicate: Some(predicate_pb),
