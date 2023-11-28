@@ -104,12 +104,12 @@ impl QueryPlan {
     /// query.
     pub fn extract_time_range(&self) -> Option<TimeRange> {
         let ts_column = if let Some(v) = self.find_timestamp_column() {
+            v
+        } else {
             warn!(
                 "Couldn't find time column, plan:{:?}, table_name:{:?}",
                 self.df_plan, self.table_name
             );
-            v
-        } else {
             return Some(TimeRange::min_to_max());
         };
         let time_range = match influxql_query::logical_optimizer::range_predicate::find_time_range(
