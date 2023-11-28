@@ -132,7 +132,7 @@ impl Instance {
             .read_runtime()
             .choose_runtime(&request.priority)
             .clone();
-        let sst_read_options = create_sst_read_option(
+        let sst_read_options_builder = SstReadOptionsBuilder::new(
             ScanType::Query,
             self.scan_options.clone(),
             table_data
