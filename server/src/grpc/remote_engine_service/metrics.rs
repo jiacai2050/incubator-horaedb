@@ -12,24 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use serde::{Deserialize, Serialize};
-use time_ext::ReadableDuration;
+use lazy_static::lazy_static;
+use prometheus::{register_int_counter_vec, IntCounterVec};
 
-// FIXME: Use cpu number as the default parallelism
-const DEFAULT_READ_PARALLELISM: usize = 8;
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(default)]
-pub struct Config {
-    pub read_parallelism: usize,
-    pub expensive_query_threshold: ReadableDuration,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            read_parallelism: DEFAULT_READ_PARALLELISM,
-            expensive_query_threshold: ReadableDuration::hours(24),
-        }
-    }
+lazy_static! {
+    pub static ref REMOTE_ENGINE_QUERY_COUNTER: IntCounterVec = register_int_counter_vec!(
+        "remote_engine_query_counter",
+        "remote_engine_query_counter",
+        &["priority"]
+    )
+    .unwrap();
 }

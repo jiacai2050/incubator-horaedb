@@ -30,8 +30,8 @@ use ceresdbproto::{
         execute_plan_request, read_response::Output::Arrow,
         remote_engine_service_server::RemoteEngineService, row_group, AlterTableOptionsRequest,
         AlterTableOptionsResponse, AlterTableSchemaRequest, AlterTableSchemaResponse, ExecContext,
-        ExecutePlanRequest, GetTableInfoRequest, GetTableInfoResponse, ReadRequest, ReadResponse,
-        WriteBatchRequest, WriteRequest, WriteResponse,
+        ExecutePlanRequest, GetTableInfoRequest, GetTableInfoResponse, QueryPriority, ReadRequest,
+        ReadResponse, WriteBatchRequest, WriteRequest, WriteResponse,
     },
     storage::{arrow_payload, ArrowPayload},
 };
@@ -41,7 +41,7 @@ use futures::{
     Future,
 };
 use generic_error::BoxError;
-use logger::{error, info, slow_query};
+use logger::{debug, error, info, slow_query};
 use notifier::notifier::{ExecutionGuard, RequestNotifiers, RequestResult};
 use proxy::{
     hotspot::{HotspotRecorder, Message},
@@ -52,6 +52,7 @@ use query_engine::{
     datafusion_impl::physical_plan::{DataFusionPhysicalPlanAdapter, TypedPlan},
     QueryEngineRef, QueryEngineType,
 };
+use runtime::{Priority, RuntimeRef};
 use snafu::{OptionExt, ResultExt};
 use table_engine::{
     engine::EngineRuntimes,
@@ -73,11 +74,15 @@ use crate::{
             REMOTE_ENGINE_GRPC_HANDLER_COUNTER_VEC,
             REMOTE_ENGINE_GRPC_HANDLER_DURATION_HISTOGRAM_VEC,
         },
-        remote_engine_service::error::{ErrNoCause, ErrWithCause, Result, StatusCode},
+        remote_engine_service::{
+            error::{ErrNoCause, ErrWithCause, Result, StatusCode},
+            metrics::REMOTE_ENGINE_QUERY_COUNTER,
+        },
     },
 };
 
 pub mod error;
+mod metrics;
 
 const STREAM_QUERY_CHANNEL_LEN: usize = 200;
 const DEFAULT_COMPRESS_MIN_LENGTH: usize = 80 * 1024;
@@ -358,6 +363,8 @@ impl RemoteEngineServiceImpl {
                     query,
                     request_notifiers.clone(),
                     config.notify_timeout.0,
+                    // TODO: decide runtime from request priority.
+                    self.runtimes.read_runtime.higher(),
                 )
                 .await?;
             }
@@ -380,6 +387,7 @@ impl RemoteEngineServiceImpl {
         query: F,
         notifiers: Arc<RequestNotifiers<K, mpsc::Sender<Result<RecordBatch>>>>,
         notify_timeout: Duration,
+        rt: &RuntimeRef,
     ) -> Result<()>
     where
         K: Hash + PartialEq + Eq,
@@ -389,7 +397,7 @@ impl RemoteEngineServiceImpl {
         let mut guard = ExecutionGuard::new(|| {
             notifiers.take_notifiers(&request_key);
         });
-        let handle = self.runtimes.read_runtime.spawn(query);
+        let handle = rt.spawn(query);
         let streams = handle.await.box_err().context(ErrWithCause {
             code: StatusCode::Internal,
             msg: "fail to join task",
@@ -404,7 +412,7 @@ impl RemoteEngineServiceImpl {
                 })
             });
 
-            let handle = self.runtimes.read_runtime.spawn(async move {
+            let handle = rt.spawn(async move {
                 let mut batches = Vec::new();
                 while let Some(batch) = stream.next().await {
                     batches.push(batch)
@@ -431,7 +439,7 @@ impl RemoteEngineServiceImpl {
         let notifiers = notifiers.take_notifiers(&request_key).unwrap();
 
         // Do send in background to avoid blocking the rpc procedure.
-        self.runtimes.read_runtime.spawn(async move {
+        rt.spawn(async move {
             Self::send_dedupped_resps(resps, notifiers, notify_timeout).await;
         });
 
@@ -615,21 +623,33 @@ impl RemoteEngineServiceImpl {
             .slow_threshold
             .load(std::sync::atomic::Ordering::Relaxed);
 
-        let metric = ExecutePlanMetricCollector::new(
-            ctx.request_id,
-            ctx.displayable_query,
-            slow_threshold_secs,
-        );
+        let priority = ctx.priority();
         let query_ctx = create_query_ctx(
             ctx.request_id,
             ctx.default_catalog,
             ctx.default_schema,
             ctx.timeout_ms,
+            priority,
+        );
+        REMOTE_ENGINE_QUERY_COUNTER
+            .with_label_values(&[query_ctx.priority.as_str()])
+            .inc();
+
+        debug!(
+            "Execute remote query, ctx:{query_ctx:?}, query:{}",
+            &ctx.displayable_query
+        );
+        let metric = ExecutePlanMetricCollector::new(
+            ctx.request_id,
+            ctx.displayable_query,
+            slow_threshold_secs,
         );
 
-        let stream = self
+        let rt = self
             .runtimes
             .read_runtime
+            .choose_runtime(&query_ctx.priority);
+        let stream = rt
             .spawn(async move { handle_execute_plan(query_ctx, encoded_plan, query_engine).await })
             .await
             .box_err()
@@ -660,6 +680,7 @@ impl RemoteEngineServiceImpl {
             .dyn_config
             .slow_threshold
             .load(std::sync::atomic::Ordering::Relaxed);
+        let priority = ctx.priority();
         let metric = ExecutePlanMetricCollector::new(
             ctx.request_id,
             ctx.displayable_query,
@@ -670,7 +691,12 @@ impl RemoteEngineServiceImpl {
             ctx.default_catalog,
             ctx.default_schema,
             ctx.timeout_ms,
+            priority,
         );
+        let rt = self
+            .runtimes
+            .read_runtime
+            .choose_runtime(&query_ctx.priority);
 
         let key = PhysicalPlanKey {
             encoded_plan: encoded_plan.clone(),
@@ -696,6 +722,7 @@ impl RemoteEngineServiceImpl {
                     query,
                     physical_plan_notifiers,
                     config.notify_timeout.0,
+                    rt,
                 )
                 .await?;
             }
@@ -1101,6 +1128,7 @@ fn create_query_ctx(
     default_catalog: String,
     default_schema: String,
     timeout_ms: i64,
+    priority: QueryPriority,
 ) -> QueryContext {
     let request_id = RequestId::from(request_id);
     let deadline = if timeout_ms >= 0 {
@@ -1108,12 +1136,17 @@ fn create_query_ctx(
     } else {
         None
     };
+    let priority = match priority {
+        QueryPriority::Low => Priority::Lower,
+        QueryPriority::High => Priority::Higher,
+    };
 
     QueryContext {
         request_id,
         deadline,
         default_catalog,
         default_schema,
+        priority,
     }
 }
 

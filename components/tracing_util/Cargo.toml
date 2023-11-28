@@ -15,8 +15,10 @@
 [package]
 name = "tracing_util"
 authors = ["Databend Authors <opensource@datafuselabs.com>", "CeresDB Authors <ceresdbservice@gmail.com>"]
-license = "Apache-2.0"
 publish = false
+
+[package.license]
+workspace = true
 
 [package.version]
 workspace = true

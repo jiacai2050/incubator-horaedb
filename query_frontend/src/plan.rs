@@ -18,13 +18,19 @@ use std::{
     collections::{BTreeMap, HashMap},
     fmt,
     fmt::{Debug, Formatter},
+    ops::Bound,
     sync::Arc,
 };
 
-use common_types::{column_schema::ColumnSchema, row::RowGroup, schema::Schema};
-use datafusion::logical_expr::{
-    expr::Expr as DfLogicalExpr, logical_plan::LogicalPlan as DataFusionLogicalPlan,
+use common_types::{column_schema::ColumnSchema, row::RowGroup, schema::Schema, time::TimeRange};
+use datafusion::{
+    logical_expr::{
+        expr::Expr as DfLogicalExpr, logical_plan::LogicalPlan as DataFusionLogicalPlan,
+    },
+    prelude::Column,
+    scalar::ScalarValue,
 };
+use logger::{debug, warn};
 use macros::define_result;
 use snafu::Snafu;
 use table_engine::{partition::PartitionInfo, table::TableRef};
@@ -72,10 +78,97 @@ pub enum Plan {
 
 pub struct QueryPlan {
     pub df_plan: DataFusionLogicalPlan,
+    pub table_name: Option<String>,
     // Contains the TableProviders so we can register the them to ExecutionContext later.
     // Use TableProviderAdapter here so we can get the underlying TableRef and also be
     // able to cast to Arc<dyn TableProvider + Send + Sync>
     pub tables: Arc<TableContainer>,
+}
+
+impl QueryPlan {
+    fn find_timestamp_column(&self) -> Option<Column> {
+        let table_name = self.table_name.as_ref()?;
+        let table_ref = self.tables.get(table_name.into())?;
+        let schema = table_ref.table.schema();
+        let timestamp_name = schema.timestamp_name();
+        Some(Column::from_name(timestamp_name))
+    }
+
+    /// This function is used to extract time range from the query plan.
+    /// It will return max possible time range. For example, if the query
+    /// contains no timestmap filter, it will return
+    /// `TimeRange::min_to_max()`
+    ///
+    /// Note: When it timestamp filter evals to false(such as ts < 10 and ts >
+    /// 100), it will return None, which means no valid time range for this
+    /// query.
+    pub fn extract_time_range(&self) -> Option<TimeRange> {
+        let ts_column = if let Some(v) = self.find_timestamp_column() {
+            warn!(
+                "Couldn't find time column, plan:{:?}, table_name:{:?}",
+                self.df_plan, self.table_name
+            );
+            v
+        } else {
+            return Some(TimeRange::min_to_max());
+        };
+        let time_range = match influxql_query::logical_optimizer::range_predicate::find_time_range(
+            &self.df_plan,
+            &ts_column,
+        ) {
+            Ok(v) => v,
+            Err(e) => {
+                warn!(
+                    "Couldn't find time range, plan:{:?}, err:{}",
+                    self.df_plan, e
+                );
+                return Some(TimeRange::min_to_max());
+            }
+        };
+
+        debug!(
+            "Extract time range, value:{time_range:?}, plan:{:?}",
+            self.df_plan
+        );
+        let mut start = i64::MIN;
+        match time_range.start {
+            Bound::Included(inclusive_start) => {
+                if let DfLogicalExpr::Literal(ScalarValue::TimestampMillisecond(Some(x), _)) =
+                    inclusive_start
+                {
+                    start = start.max(x);
+                }
+            }
+            Bound::Excluded(exclusive_start) => {
+                if let DfLogicalExpr::Literal(ScalarValue::TimestampMillisecond(Some(x), _)) =
+                    exclusive_start
+                {
+                    start = start.max(x + 1);
+                }
+            }
+            Bound::Unbounded => {}
+        }
+        let mut end = i64::MAX;
+        match time_range.end {
+            Bound::Included(inclusive_end) => {
+                if let DfLogicalExpr::Literal(ScalarValue::TimestampMillisecond(Some(x), _)) =
+                    inclusive_end
+                {
+                    end = end.min(x + 1);
+                }
+            }
+            Bound::Excluded(exclusive_start) => {
+                if let DfLogicalExpr::Literal(ScalarValue::TimestampMillisecond(Some(x), _)) =
+                    exclusive_start
+                {
+                    end = end.min(x);
+                }
+            }
+            Bound::Unbounded => {}
+        }
+
+        TimeRange::new(start.into(), end.into())
+    }
 }
 
 impl Debug for QueryPlan {
@@ -199,4 +292,78 @@ pub enum ShowPlan {
 #[derive(Debug)]
 pub struct ExistsTablePlan {
     pub exists: bool,
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    use crate::planner::tests::sql_to_logical_plan;
+
+    #[test]
+    fn test_extract_time_range() {
+        // key2 is timestamp column
+        let testcases = [
+            (
+                "select * from test_table where key2 > 1 and key2 < 10",
+                Some((2, 10)),
+            ),
+            (
+                "select * from test_table where key2 >= 1 and key2 <= 10",
+                Some((1, 11)),
+            ),
+            (
+                "select * from test_table where key2 < 1 and key2 > 10",
+                None,
+            ),
+            (
+                "select * from test_table where key2 < 1 ",
+                Some((i64::MIN, 1))
+            ),
+            (
+                "select * from test_table where key2 > 1 ",
+                Some((2, i64::MAX))
+            ),
+            // date literals
+            (
+                r#"select * from test_table where key2 >= "2023-11-21 14:12:00+08:00" and key2 < "2023-11-21 14:22:00+08:00" "#,
+                Some((1700547120000, 1700547720000))
+            ),
+             // no timestamp filter
+            ("select * from test_table", Some((i64::MIN, i64::MAX))),
+            // aggr
+            (
+                "select key2, sum(field1) from test_table where key2 > 1 and key2 < 10 group by key2",
+                Some((2, 10)),
+            ),
+            // aggr & sort
+            (
+                "select key2, sum(field1) from test_table where key2 > 1 and key2 < 10 group by key2 order by key2",     Some((2, 10)),
+            ),
+            // explain
+            (
+                "explain select * from test_table where key2 > 1 and key2 < 10",
+                Some((2, 10)),
+            ),
+            // analyze
+            (
+                "explain analyze select * from test_table where key2 > 1 and key2 < 10",
+                Some((2, 10)),
+            ),
+        ];
+
+        for case in testcases {
+            let sql = case.0;
+            let plan = sql_to_logical_plan(sql).unwrap();
+            let plan = match plan {
+                Plan::Query(v) => v,
+                _ => unreachable!(),
+            };
+            let expected = case
+                .1
+                .map(|v| TimeRange::new_unchecked(v.0.into(), v.1.into()));
+
+            assert_eq!(plan.extract_time_range(), expected, "sql:{}", sql);
+        }
+    }
 }

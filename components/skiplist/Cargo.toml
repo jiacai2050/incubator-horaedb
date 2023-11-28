@@ -16,6 +16,9 @@
 name = "skiplist"
 authors = ["Jay Lee <busyjaylee@gmail.com>", "CeresDB Authors <ceresdbservice@gmail.com>"]
 
+[package.license]
+workspace = true
+
 [package.version]
 workspace = true
 
