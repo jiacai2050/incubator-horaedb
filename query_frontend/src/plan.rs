@@ -309,6 +309,10 @@ mod tests {
                 Some((2, 10)),
             ),
             (
+                "select field1 from test_table where key2 > 1 and key2 < 10",
+                Some((2, 10)),
+            ),
+            (
                 "select * from test_table where key2 >= 1 and key2 <= 10",
                 Some((1, 11)),
             ),
