@@ -308,6 +308,7 @@ impl<'a> Reader<'a> {
         let mut streams = Vec::with_capacity(target_row_group_chunks.len());
         let metrics_collector = ObjectStoreMetricsObserver {
             table_level_sst_metrics: self.table_level_sst_metrics.clone(),
+            skip_metrics: self.frequency == ReadFrequency::Once,
         };
         for chunk in target_row_group_chunks {
             let object_store_reader = ObjectStoreReader::with_metrics(
@@ -774,6 +775,7 @@ impl<'a> SstReader for ThreadedReader<'a> {
 #[derive(Clone)]
 struct ObjectStoreMetricsObserver {
     table_level_sst_metrics: Arc<MaybeTableLevelMetrics>,
+    skip_metrics: bool,
 }
 
 impl MetricsObserver for ObjectStoreMetricsObserver {
@@ -782,6 +784,10 @@ impl MetricsObserver for ObjectStoreMetricsObserver {
     }
 
     fn num_bytes_fetched(&self, _: &Path, num_bytes: usize) {
+        if self.skip_metrics {
+            return;
+        }
+
         self.table_level_sst_metrics
             .num_fetched_sst_bytes
             .fetch_add(num_bytes as u64, Ordering::Relaxed);

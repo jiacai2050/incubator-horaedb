@@ -95,7 +95,7 @@ pub trait Factory: Send + Sync + Debug {
 
 /// The frequency of query execution may decide some behavior in the sst reader,
 /// e.g. cache policy.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ReadFrequency {
     Once,
     Frequent,
