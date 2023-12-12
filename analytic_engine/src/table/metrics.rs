@@ -274,14 +274,16 @@ impl<'a> MetricsContext<'a> {
         if !self.metric_opt.enable_table_level_metrics {
             DEFAULT_METRICS_KEY
         } else {
-            let maybe_partition_table = maybe_extract_partitioned_table_name(self.table_name);
-            match maybe_partition_table {
-                Some(partitioned) => {
-                    self.maybe_partitioned_table_name = Some(partitioned);
-                    self.maybe_partitioned_table_name.as_ref().unwrap()
-                }
-                None => self.table_name,
-            }
+            // let maybe_partition_table =
+            // maybe_extract_partitioned_table_name(self.table_name);
+            // match maybe_partition_table {
+            //     Some(partitioned) => {
+            //         self.maybe_partitioned_table_name = Some(partitioned);
+            //         self.maybe_partitioned_table_name.as_ref().unwrap()
+            //     }
+            //     None => self.table_name,
+            // }
+            self.table_name
         }
     }
 }
