@@ -310,7 +310,7 @@ impl Service {
             .and(self.with_proxy())
             .and(self.with_read_runtime())
             .and_then(
-                |req, mut ctx: RequestContext, proxy: Arc<Proxy>, runtime: RuntimeRef| async move {
+                |req, mut ctx: RequestContext, proxy: Arc<Proxy>, runtime: PriorityRuntime| async move {
                     // We don't timeout http api since it's mainly used for debugging.
                     ctx.timeout = None;
 
