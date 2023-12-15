@@ -47,7 +47,7 @@ use table_engine::{partition::maybe_extract_partitioned_table_name, table::Table
 
 use crate::{
     sst::metrics::MaybeTableLevelMetrics as SstMaybeTableLevelMetrics,
-    table::table_stats::TableStatsImpl, MetricsOptions,
+    table::table_stats::TableStatsImpl, MetricsOptions, TableStatsOptions,
 };
 
 const KB: f64 = 1024.0;
@@ -259,14 +259,20 @@ pub struct MetricsContext<'a> {
     table_name: &'a str,
     metric_opt: MetricsOptions,
     maybe_partitioned_table_name: Option<String>,
+    table_stats_opts: TableStatsOptions,
 }
 
 impl<'a> MetricsContext<'a> {
-    pub fn new(table_name: &'a str, metric_opt: MetricsOptions) -> Self {
+    pub fn new(
+        table_name: &'a str,
+        metric_opt: MetricsOptions,
+        table_stats_opts: TableStatsOptions,
+    ) -> Self {
         Self {
             table_name,
             metric_opt,
             maybe_partitioned_table_name: None,
+            table_stats_opts,
         }
     }
 
@@ -290,8 +296,13 @@ impl<'a> MetricsContext<'a> {
 
 impl Metrics {
     pub fn new(mut metric_ctx: MetricsContext) -> Self {
+        let table_stats = TableStatsImpl::new(
+            metric_ctx.table_name.to_string(),
+            metric_ctx.table_stats_opts.clone(),
+        );
         Self {
             maybe_table_name: metric_ctx.maybe_table_name().to_string(),
+            stats: Arc::new(table_stats),
             ..Default::default()
         }
     }
