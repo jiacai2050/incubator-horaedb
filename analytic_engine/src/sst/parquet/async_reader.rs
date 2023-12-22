@@ -57,7 +57,6 @@ use tokio::sync::{
 };
 use trace_metric::{MetricsCollector, TraceMetricWhenDrop};
 
-use super::meta_data::ColumnValueSet;
 use crate::{
     prefetchable_stream::{NoopPrefetcher, PrefetchableStream},
     sst::{
@@ -68,7 +67,9 @@ use crate::{
         },
         metrics::MaybeTableLevelMetrics,
         parquet::{
-            encoding::ParquetDecoder, meta_data::ParquetFilter, row_group_pruner::RowGroupPruner,
+            encoding::ParquetDecoder,
+            meta_data::{ColumnValueSet, ParquetFilter},
+            row_group_pruner::RowGroupPruner,
         },
         reader::{error::*, Result, SstReader},
     },
@@ -100,7 +101,7 @@ pub struct Reader<'a> {
     metrics: Metrics,
     df_plan_metrics: ExecutionPlanMetricsSet,
 
-    table_level_sst_metrics: Arc<MaybeTableLevelMetrics>,
+    table_level_sst_metrics: Option<Arc<MaybeTableLevelMetrics>>,
 }
 
 #[derive(Default, Debug, Clone, TraceMetricWhenDrop)]
@@ -130,6 +131,9 @@ impl<'a> Reader<'a> {
             ..Default::default()
         };
 
+        let table_level_sst_metrics = matches!(options.frequency, ReadFrequency::Frequent)
+            .then(|| options.maybe_table_level_metrics.clone());
+
         Self {
             path,
             store,
@@ -143,7 +147,7 @@ impl<'a> Reader<'a> {
             record_fetching_ctx: None,
             metrics,
             df_plan_metrics,
-            table_level_sst_metrics: options.maybe_table_level_metrics.clone(),
+            table_level_sst_metrics,
         }
     }
 
@@ -260,11 +264,11 @@ impl<'a> Reader<'a> {
         let num_row_group_after_prune = target_row_groups.len();
         // Maybe it is a sub table of partitioned table, try to extract its parent
         // table.
-        if let ReadFrequency::Frequent = self.frequency {
-            self.table_level_sst_metrics
+        if let Some(metrics) = &self.table_level_sst_metrics {
+            metrics
                 .row_group_before_prune_counter
                 .inc_by(num_row_group_before_prune as u64);
-            self.table_level_sst_metrics
+            metrics
                 .row_group_after_prune_counter
                 .inc_by(num_row_group_after_prune as u64);
         }
@@ -308,7 +312,6 @@ impl<'a> Reader<'a> {
         let mut streams = Vec::with_capacity(target_row_group_chunks.len());
         let metrics_collector = ObjectStoreMetricsObserver {
             table_level_sst_metrics: self.table_level_sst_metrics.clone(),
-            skip_metrics: self.frequency == ReadFrequency::Once,
         };
         for chunk in target_row_group_chunks {
             let object_store_reader = ObjectStoreReader::with_metrics(
@@ -774,23 +777,20 @@ impl<'a> SstReader for ThreadedReader<'a> {
 
 #[derive(Clone)]
 struct ObjectStoreMetricsObserver {
-    table_level_sst_metrics: Arc<MaybeTableLevelMetrics>,
-    skip_metrics: bool,
+    table_level_sst_metrics: Option<Arc<MaybeTableLevelMetrics>>,
 }
 
 impl MetricsObserver for ObjectStoreMetricsObserver {
     fn elapsed(&self, path: &Path, elapsed: Duration) {
-        debug!("ObjectStoreReader dropped, path:{path}, elapsed:{elapsed:?}",);
+        debug!("ObjectStoreReader dropped, path:{path}, elapsed:{elapsed:?}");
     }
 
     fn num_bytes_fetched(&self, _: &Path, num_bytes: usize) {
-        if self.skip_metrics {
-            return;
+        if let Some(metrics) = &self.table_level_sst_metrics {
+            metrics
+                .num_fetched_sst_bytes
+                .fetch_add(num_bytes as u64, Ordering::Relaxed);
         }
-
-        self.table_level_sst_metrics
-            .num_fetched_sst_bytes
-            .fetch_add(num_bytes as u64, Ordering::Relaxed);
     }
 }
 

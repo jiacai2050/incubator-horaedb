@@ -14,7 +14,12 @@
 
 // Flush and compaction logic of instance
 
-use std::{cmp, collections::Bound, fmt, sync::Arc};
+use std::{
+    cmp,
+    collections::{Bound, HashMap},
+    fmt,
+    sync::Arc,
+};
 
 use common_types::{
     projected_schema::{ProjectedSchema, RecordFetchingContextBuilder},
@@ -55,9 +60,9 @@ use crate::{
         IterOptions,
     },
     sst::{
-        factory::{self, ScanOptions, SstWriteOptions},
+        factory::{self, ColumnStats, ScanOptions, SstWriteOptions},
         file::{FileMeta, Level},
-        meta_data::SstMetaReader,
+        meta_data::{SstMetaData, SstMetaReader},
         writer::{MetaData, RecordBatchStream},
     },
     table::{
@@ -583,6 +588,7 @@ impl FlushTask {
             num_rows_per_row_group: self.table_data.table_options().num_rows_per_row_group,
             compression: self.table_data.table_options().compression,
             max_buffer_size: self.write_sst_max_buffer_size,
+            column_stats: Default::default(),
         };
 
         for time_range in &time_ranges {
@@ -754,6 +760,7 @@ impl FlushTask {
             num_rows_per_row_group: self.table_data.table_options().num_rows_per_row_group,
             compression: self.table_data.table_options().compression,
             max_buffer_size: self.write_sst_max_buffer_size,
+            column_stats: Default::default(),
         };
         let mut writer = self
             .space_store
@@ -1007,7 +1014,7 @@ impl SpaceStore {
 
         // TODO: eliminate the duplicated building of `SstReadOptions`.
         let sst_read_options = sst_read_options_builder.build(record_fetching_ctx_builder);
-        let sst_meta = {
+        let (sst_meta, column_stats) = {
             let meta_reader = SstMetaReader {
                 space_id: table_data.space_id,
                 table_id: table_data.id,
@@ -1020,7 +1027,9 @@ impl SpaceStore {
                 .await
                 .context(ReadSstMeta)?;
 
-            MetaData::merge(sst_metas.into_iter().map(MetaData::from), schema)
+            let column_stats = collect_column_stats_from_meta_datas(&sst_metas);
+            let merged_meta = MetaData::merge(sst_metas.into_iter().map(MetaData::from), schema);
+            (merged_meta, column_stats)
         };
 
         // Alloc file id for the merged sst.
@@ -1030,10 +1039,17 @@ impl SpaceStore {
             .context(AllocFileId)?;
 
         let sst_file_path = table_data.set_sst_file_path(file_id);
+        let write_options = SstWriteOptions {
+            storage_format_hint: sst_write_options.storage_format_hint,
+            num_rows_per_row_group: sst_write_options.num_rows_per_row_group,
+            compression: sst_write_options.compression,
+            max_buffer_size: sst_write_options.max_buffer_size,
+            column_stats,
+        };
         let mut sst_writer = self
             .sst_factory
             .create_writer(
-                sst_write_options,
+                &write_options,
                 &sst_file_path,
                 self.store_picker(),
                 input.output_level,
@@ -1126,6 +1142,42 @@ impl SpaceStore {
     }
 }
 
+/// Collect the column stats from a batch of sst meta data.
+fn collect_column_stats_from_meta_datas(metas: &[SstMetaData]) -> HashMap<String, ColumnStats> {
+    let mut low_cardinality_counts: HashMap<String, usize> = HashMap::new();
+    for meta_data in metas {
+        let SstMetaData::Parquet(meta_data) = meta_data;
+        if let Some(column_values) = &meta_data.column_values {
+            for (col_idx, val_set) in column_values.iter().enumerate() {
+                let low_cardinality = val_set.is_some();
+                if low_cardinality {
+                    let col_name = meta_data.schema.column(col_idx).name.clone();
+                    low_cardinality_counts
+                        .entry(col_name)
+                        .and_modify(|v| *v += 1)
+                        .or_insert(1);
+                }
+            }
+        }
+    }
+
+    // Only the column whose cardinality is low in all the metas is a
+    // low-cardinality column.
+    // TODO: shall we merge all the distinct values of the column to check whether
+    // the cardinality is still thought to be low?
+    let low_cardinality_cols = low_cardinality_counts
+        .into_iter()
+        .filter_map(|(col_name, cnt)| {
+            (cnt == metas.len()).then_some((
+                col_name,
+                ColumnStats {
+                    low_cardinality: true,
+                },
+            ))
+        });
+    HashMap::from_iter(low_cardinality_cols)
+}
+
 fn split_record_batch_with_time_ranges(
     record_batch: FetchingRecordBatch,
     time_ranges: &[TimeRange],
@@ -1203,9 +1255,13 @@ fn build_mem_table_iter(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
+    use bytes_ext::Bytes;
     use common_types::{
+        schema::Schema,
         tests::{
-            build_fetching_record_batch_by_rows, build_row, build_row_opt,
+            build_record_batch_with_key_by_rows, build_row, build_row_opt, build_schema,
             check_record_batch_with_key_with_rows,
         },
         time::TimeRange,
