@@ -58,7 +58,7 @@ const MIN_NUM_ROWS_SAMPLE_DICT_ENCODING: usize = 1024;
 /// If the number of unique value exceeds
 /// `total_num_values * MAX_UNIQUE_VALUE_RATIO_DICT_ENCODING`, there is no need
 /// to do dictionary encoding for such column.
-const MAX_UNIQUE_VALUE_RATIO_DICT_ENCODING: f64 = 0.12;
+const MAX_UNIQUE_VALUE_RATIO_DICT_ENCODING: f64 = 0.003;
 
 /// The implementation of sst based on parquet and object storage.
 #[derive(Debug)]
