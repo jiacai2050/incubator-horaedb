@@ -164,6 +164,7 @@ impl Instance {
             scan_options,
             recover_mode: ctx.config.recover_mode,
             wal_encode: ctx.config.wal_encode,
+            disable_wal: ctx.config.wal.disable_data,
         });
 
         Ok(instance)
