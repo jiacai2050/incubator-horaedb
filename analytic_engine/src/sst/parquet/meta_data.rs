@@ -144,7 +144,9 @@ impl RowGroupFilterBuilder {
             .enumerate()
             .map(|(i, col)| {
                 if record_schema.is_primary_key_index(i) {
-                    return None;
+                    if !matches!(col.data_type, DatumKind::String) {
+                        return None;
+                    }
                 }
 
                 if matches!(
