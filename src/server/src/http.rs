@@ -93,22 +93,6 @@ pub enum Error {
     #[snafu(display("Missing proxy.\nBacktrace:\n{}", backtrace))]
     MissingProxy { backtrace: Backtrace },
 
-    #[snafu(display(
-        "Fail to do heap profiling, err:{}.\nBacktrace:\n{}",
-        source,
-        backtrace
-    ))]
-    ProfileHeap {
-        source: profile::Error,
-        backtrace: Backtrace,
-    },
-
-    #[snafu(display("Fail to do cpu profiling, err:{}.\nBacktrace:\n{}", source, backtrace))]
-    ProfileCPU {
-        source: profile::Error,
-        backtrace: Backtrace,
-    },
-
     #[snafu(display("Fail to join async task, err:{}.", source))]
     JoinAsyncTask { source: runtime::Error },
 
@@ -185,6 +169,7 @@ pub struct Service {
     proxy: Arc<Proxy>,
     engine_runtimes: Arc<EngineRuntimes>,
     log_runtime: Arc<RuntimeLevel>,
+    #[cfg(not(windows))]
     profiler: Arc<Profiler>,
     tx: Sender<()>,
     rx: Option<Receiver<()>>,
@@ -533,6 +518,7 @@ impl Service {
     }
 
     // GET /debug/profile/cpu/{seconds}
+    #[cfg(not(windows))]
     fn profile_cpu(
         &self,
     ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -544,7 +530,10 @@ impl Service {
             .and_then(
                 |duration_sec: u64, profiler: Arc<Profiler>, runtime: Arc<Runtime>| async move {
                     let handle = runtime.spawn_blocking(move || -> Result<()> {
-                        profiler.dump_cpu_prof(duration_sec).context(ProfileCPU)
+                        profiler
+                            .dump_cpu_prof(duration_sec)
+                            .box_err()
+                            .context(Internal)
                     });
                     let result = handle.await.context(JoinAsyncTask);
                     match result {
@@ -556,6 +545,7 @@ impl Service {
     }
 
     // GET /debug/profile/heap/{seconds}
+    #[cfg(not(windows))]
     fn profile_heap(
         &self,
     ) -> impl Filter<Extract = (impl warp::Reply,), Error = warp::Rejection> + Clone {
@@ -567,7 +557,10 @@ impl Service {
             .and_then(
                 |duration_sec: u64, profiler: Arc<Profiler>, runtime: Arc<Runtime>| async move {
                     let handle = runtime.spawn_blocking(move || {
-                        profiler.dump_heap_prof(duration_sec).context(ProfileHeap)
+                        profiler
+                            .dump_heap_prof(duration_sec)
+                            .box_err()
+                            .context(Internal)
                     });
                     let result = handle.await.context(JoinAsyncTask);
                     match result {
@@ -767,6 +760,7 @@ impl Service {
             )
     }
 
+    #[cfg(not(windows))]
     fn with_profiler(&self) -> impl Filter<Extract = (Arc<Profiler>,), Error = Infallible> + Clone {
         let profiler = self.profiler.clone();
         warp::any().map(move || profiler.clone())
@@ -886,6 +880,7 @@ impl Builder {
             proxy,
             engine_runtimes,
             log_runtime,
+            #[cfg(not(windows))]
             profiler: Arc::new(Profiler::default()),
             tx,
             rx: Some(rx),
@@ -925,8 +920,6 @@ fn error_to_status_code(err: &Error) -> StatusCode {
         | Error::MissingSchemaConfigProvider { .. }
         | Error::MissingProxy { .. }
         | Error::ParseIpAddr { .. }
-        | Error::ProfileHeap { .. }
-        | Error::ProfileCPU { .. }
         | Error::Internal { .. }
         | Error::JoinAsyncTask { .. }
         | Error::AlreadyStarted { .. }

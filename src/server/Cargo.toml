@@ -62,7 +62,6 @@ opensrv-mysql = "0.1.0"
 partition_table_engine = { workspace = true }
 paste = { workspace = true }
 pgwire = "0.19.1"
-profile = { workspace = true }
 prom-remote-api = { workspace = true, features = ["warp"] }
 prometheus = { workspace = true }
 prometheus-static-metric = { workspace = true }
@@ -88,6 +87,9 @@ tonic = { workspace = true }
 wal = { workspace = true }
 warp = "0.3"
 zstd = { workspace = true }
+
+[target.'cfg(not(windows))'.dependencies]
+profile = { workspace = true }
 
 [dev-dependencies]
 query_frontend = { workspace = true, features = ["test"] }
